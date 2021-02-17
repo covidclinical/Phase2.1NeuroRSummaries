@@ -1,0 +1,210 @@
+---
+title: "Metaanalysis"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(meta)
+```
+
+```{r}
+load('results/NWU_results.rda')
+load('results/UPENN_results.rda')
+```
+
+```{r}
+get_site <- function(x){
+  x$first_hosp_results$site
+}
+
+get_result_row <- function(df,
+                           period = 'first_hosp_results',
+                           neuro_type = 'cpns_results',
+                           outcome = 'n_stay_reg_elix') {
+  df[[c(period, neuro_type, outcome, 'coefficients')]] %>%
+    as.data.frame() %>%
+    rownames_to_column('term') %>%
+    mutate(site = get_site(df)) %>%
+    filter(grepl('neuro_postPeripheral', term))
+}
+
+get_result_row(UPENN_results) %>%
+  metagen(Estimate,
+          `Std. Error`,
+          data = .,
+          sm = 'MD',
+          studlab = site)
+
+```
+
+
+## TODO
+
+```{r}
+m_nstay <- bind_rows(broom::tidy(penn_results$n_stay_reg_elix),
+                     nwu_results$n_stay_reg_elix) %>%
+  filter(grepl('neuro_post', term)) %>%
+  metagen(estimate,
+          std.error,
+          data = .,
+          sm = 'MD',
+          studlab = site)
+summary(m_nstay)
+m_nstay
+
+meta_nstay <- data.frame(
+  n_sites = nrow(m_nstay$data),
+  estimate = m_nstay$TE.fixed,
+  pval = m_nstay$pval.fixed,
+  i2 = m_nstay$I2, Q = m_nstay$Q, pQ = m_nstay$pval.Q)
+```
+The chi-square test for heterogeneity was non-significant. 
+The $I^2$ value was zero, suggesting there was little between-study variability.
+
+```{r}
+m_severity <- bind_rows(broom::tidy(penn_results$severe_reg_elix),
+                        nwu_results$severe_reg_elix) %>%
+  filter(term == 'neuro_postneuro_cond') %>%
+  metagen(estimate,
+          std.error,
+          data = .,
+          sm = 'MD',
+          studlab = site)
+summary(m_severity)
+m_severity
+
+meta_severity <- data.frame(
+  n_sites = nrow(m_severity$data),
+  estimate = m_severity$TE.fixed,
+  pval = m_severity$pval.fixed,
+  i2 = m_severity$I2, Q = m_severity$Q, pQ = m_severity$pval.Q)
+```
+
+```{r}
+m_survival <- bind_rows(broom::tidy(penn_results$deceased_reg_elix),
+                        nwu_results$deceased_reg_elix) %>%
+  filter(term == 'neuro_postneuro_cond') %>%
+  metagen(estimate,
+          std.error,
+          data = .,
+          sm = 'MD',
+          studlab = site)
+summary(m_survival)
+m_survival
+
+meta_survival <- data.frame(
+  n_sites = nrow(m_survival$data),
+  estimate = m_survival$TE.fixed,
+  pval = m_survival$pval.fixed,
+  i2 = m_survival$I2, Q = m_survival$Q, pQ = m_survival$pval.Q)
+```
+
+
+```{r warning=FALSE, message=FALSE, include=FALSE, eval=FALSE}
+# Metaanalysis
+# ind_fish <- diag_icd_10 %>% 
+#   group_by(full_icd, time, siteid) %>% 
+#   summarise(across(contains('severe'), .fns = sum, na.rm = T), .groups = 'drop') %>% 
+#   mutate(Observed = num_patients_ever_severe_icd1, 
+#          num_non_severe = num_patients_never_severe_icd1 + num_patients_never_severe_icd0,
+#          num_severe = num_patients_ever_severe_icd1 + num_patients_ever_severe_icd0,
+#          Expected = num_patients_never_severe_icd1/num_non_severe*num_severe,
+#          over_sev = Observed - Expected) %>%
+#   filter(!is.na(Expected), num_patients_never_severe_icd0 >= 0) %>% 
+#   select(full_icd, time, siteid,
+#          num_patients_never_severe_icd0, 
+#          num_patients_never_severe_icd1,
+#          num_patients_ever_severe_icd0, 
+#          num_patients_ever_severe_icd1) %>% 
+#   group_by(full_icd, time, siteid) %>% 
+#   nest() %>% 
+#   mutate(fish = map(data, my_fish)) %>% 
+#   dplyr::select(-data) %>% 
+#   unnest(cols = c(fish)) 
+# 
+# madata <- ind_fish %>% 
+#   mutate(upper = ifelse(is.na(upper), Inf, upper),
+#          lestimate = log2(estimate),
+#          llower = log2(lower),
+#          lupper = log2(upper),
+#          mase = (lupper - llower)/(2*alpha_threshold))
+# meta_res <- data.frame()
+# for (timei in c('Before admission', 'After admission')){
+#   for (icdi in unique(madata$full_icd)){
+#     m <- madata %>% 
+#       filter(full_icd == icdi, time == timei, !is.na(estimate)) %>% 
+#       metagen(lestimate,
+#               mase,
+#               data = .,
+#               method.tau = "SJ",
+#               sm = 'RR',
+#               studlab=siteid)
+#     
+#     meta_res <- meta_res %>% 
+#       rbind(data.frame(n_sites = nrow(m$data), full_icd = icdi, time = timei,
+#                        estimate = m$TE.fixed, pval = m$pval.fixed,
+#                        i2 = m$I2, li2 = m$lower.I2, ui2 = m$upper.I2, 
+#                        Q = m$Q, pQ = m$pval.Q))
+#   }
+# }
+# 
+# meta_res$pval_fdr <-  p.adjust(meta_res$pval, 'BH')
+# write_csv(meta_res, 'results/metaanalysis_results.csv')
+```
+
+
+### By Neuro Diagnosis
+
+```{r fig.width=10}
+# nstay_df <- neuro_patients %>% 
+#   bind_rows(non_neuro_patients) %>% 
+#   left_join(demo_df, by = 'patient_num') %>% 
+#   # mutate(concept_code = fct_reorder(concept_code, n_stay)) %>% 
+#   left_join(neuro_icds_10, by = c('concept_code' = 'icd')) %>%
+#   mutate(full_icd = case_when(
+#     concept_code == 'NN' ~ 'No neurological condition',
+#     TRUE ~ paste0(`ICD-10 Description`, ' (', concept_code, ')')) %>%
+#              as.factor() %>% fct_reorder(n_stay)) 
+# 
+# nstay_df %>%
+#   ggplot(aes(y = full_icd, x = n_stay, fill = full_icd)) +
+#   labs(y = NULL) +
+#   geom_boxplot() + 
+#   scale_fill_viridis_d(guide = FALSE) +
+#   gghighlight(concept_code != 'NN') +
+#   NULL
+# 
+# summarised_stay <- nstay_df %>% 
+#   group_by(concept_code) %>% 
+#   summarise(mean_stay = mean(n_stay),
+#             sd_stay = sd(n_stay),
+#             n_patients = n(),
+#             .groups = 'drop')
+```
+
+## Comorbidities by Diagnosis
+
+Here we will use the `obs_processed` dataframe in contrast to our `scores_unique` dataframe as the former is in long format
+
+
+```{r}
+# scores_neuro %>% 
+#   distinct(patient_num, concept_code, `Neurological Disease Category`) %>%
+#   left_join(index_scores_elix %>% select(patient_num, elixhauser_score), by = "patient_num") %>%
+#   filter(!is.na(elixhauser_score)) %>% 
+#   ggplot(aes(y = concept_code, x = elixhauser_score, fill = concept_code)) + 
+#   facet_grid(rows = vars(`Neurological Disease Category`),
+#              scales = 'free', space = 'free') +
+#   geom_boxplot(alpha = 0.6) + 
+#   scale_fill_viridis_d(guide = FALSE, direction = -1) +
+#   labs(x = 'Elixhauser score', y = NULL) +
+#   NULL +
+#   theme(panel.grid = element_blank(),
+#         legend.title = element_text(),
+#         strip.text.y = element_text(angle = 0),
+#         panel.spacing.x = unit(10, "points"),
+#         panel.spacing.y = unit(0, "points"))
+```
+
+
