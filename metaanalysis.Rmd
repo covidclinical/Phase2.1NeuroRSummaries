@@ -19,22 +19,47 @@ get_site <- function(x){
 }
 
 get_result_row <- function(df,
+                           outcome = 'n_stay_reg_elix',
                            period = 'first_hosp_results',
                            neuro_type = 'cpns_results',
-                           outcome = 'n_stay_reg_elix') {
+                           neuro_chr = 'neuro_postCentral') {
+  # neuro_chr <- switch(neuro_type,
+  #   cpns_results = 'neuro_postPeripheral',
+  #   binary_results = 'neuro_postneuro_cond'
+  # )
   df[[c(period, neuro_type, outcome, 'coefficients')]] %>%
     as.data.frame() %>%
     rownames_to_column('term') %>%
     mutate(site = get_site(df)) %>%
-    filter(grepl('neuro_postPeripheral', term))
+    filter(grepl(neuro_chr, term))
 }
 
-get_result_row(UPENN_results) %>%
-  metagen(Estimate,
-          `Std. Error`,
-          data = .,
-          sm = 'MD',
-          studlab = site)
+outcomes <-
+  c(
+    "n_stay_reg_elix",
+    "severe_reg_elix",
+    "deceased_reg_elix",
+    "n_readmit_reg_elix",
+    "readmit_reg_elix",
+    "time_severe_reg_elix",
+    "time_deceased_reg_elix",
+    "time_reg_elix" # this is time to first readmission
+  )
+
+meta_results <- list()
+for (outcome_i in outcomes) {
+  meta_results[[outcome_i]] <-
+    list(UPENN_results, NWU_results) %>% # add other results here
+    lapply(get_result_row, outcome = outcome_i) %>%
+    bind_rows() %>%
+    metagen(
+      Estimate,
+      `Std. Error`,
+      data = .,
+      sm = 'MD',
+      studlab = site
+    )
+}
 
 ```
 
