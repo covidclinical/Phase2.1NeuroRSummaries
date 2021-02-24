@@ -1,0 +1,60 @@
+---
+title: "visualizations"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(meta)
+```
+
+```{r}
+load('results/NWU_results.rda')
+load('results/UPENN_results.rda')
+```
+
+```{r}
+obs_later_hosp <- NWU_results$obs_later_hosp
+
+right_join0 <- function(x, y, fill = 0L, ...) {
+  z <- right_join(x, y, ...)
+  tmp <- setdiff(names(z), names(y))
+  tidyr::replace_na(z, setNames(as.list(rep(fill, length(
+    tmp
+  ))), tmp))
+}
+
+new_codes <- obs_later_hosp %>%
+  unnest(c(early_code, n_new_code)) %>%
+  group_by(early_code) %>%
+  # add_count() %>%
+  summarise(
+    n = n(),
+    `New codes` = sum(n_new_code),
+    `No codes` = sum(n_new_code == 0)
+  ) %>%
+  select(early_code, n, `New codes`, `No codes`)
+
+rep_codes <- obs_later_hosp %>%
+  unnest(repeated_code) %>%
+  pull(repeated_code) %>%
+  table() %>%
+  data.frame() %>%
+  `colnames<-`(c('early_code', 'Repeated'))
+
+propagated_codes <- rep_codes %>%
+  right_join0(new_codes, by = 'early_code')
+
+propagated_codes %>%
+  pivot_longer(-c(early_code, n)) %>%
+  ggplot(aes(
+    y = fct_reorder(early_code, n),
+    x = value,
+    fill = name
+  )) +
+  geom_col() +
+  rcartocolor::scale_fill_carto_d() +
+  labs(y = NULL, x = 'Number of codes', fill = NULL) +
+  theme_bw()
+```
+

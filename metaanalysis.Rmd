@@ -15,7 +15,7 @@ load('results/UPENN_results.rda')
 
 ```{r}
 get_site <- function(x){
-  x$first_hosp_results$site
+  x$site
 }
 
 get_result_row <- function(df,
@@ -43,7 +43,7 @@ outcomes <-
     "readmit_reg_elix",
     "time_severe_reg_elix",
     "time_deceased_reg_elix",
-    "time_reg_elix" # this is time to first readmission
+    "time_readmit_reg_elix" # this is time to first readmission
   )
 
 meta_results <- list()
