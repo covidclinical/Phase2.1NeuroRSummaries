@@ -25,6 +25,7 @@ right_join0 <- function(x, y, fill = 0L, ...) {
 }
 
 new_codes <- obs_later_hosp %>%
+  filter(readmitted) %>%
   unnest(c(early_code, n_new_code)) %>%
   group_by(early_code) %>%
   # add_count() %>%
