@@ -14,7 +14,13 @@ load('results/UPENN_results.rda')
 ```
 
 ```{r}
-obs_later_hosp <- NWU_results$obs_later_hosp
+heatmap(NWU_results$elix_mat)
+heatmap(UPENN_results$elix_mat)
+```
+
+
+```{r}
+propagated_codes <- UPENN_results$propagated_codes
 
 right_join0 <- function(x, y, fill = 0L, ...) {
   z <- right_join(x, y, ...)
@@ -24,38 +30,48 @@ right_join0 <- function(x, y, fill = 0L, ...) {
   ))), tmp))
 }
 
-new_codes <- obs_later_hosp %>%
-  filter(readmitted) %>%
-  unnest(c(early_code, n_new_code)) %>%
-  group_by(early_code) %>%
-  # add_count() %>%
-  summarise(
-    n = n(),
-    `New codes` = sum(n_new_code),
-    `No codes` = sum(n_new_code == 0)
-  ) %>%
-  select(early_code, n, `New codes`, `No codes`)
-
-rep_codes <- obs_later_hosp %>%
-  unnest(repeated_code) %>%
-  pull(repeated_code) %>%
-  table() %>%
-  data.frame() %>%
-  `colnames<-`(c('early_code', 'Repeated'))
-
-propagated_codes <- rep_codes %>%
-  right_join0(new_codes, by = 'early_code')
-
-propagated_codes %>%
-  pivot_longer(-c(early_code, n)) %>%
-  ggplot(aes(
-    y = fct_reorder(early_code, n),
-    x = value,
-    fill = name
-  )) +
+temp_code_plot <- propagated_codes %>%
+  select(- prop_new_codes, - n_new_codes) %>% 
+  pivot_longer(-c(early_code))
+temp_code_plot %>%  ggplot(aes(
+  y = fct_reorder(early_code, value, .fun = max),
+  x = value,
+  fill = name
+)) +
+  facet_wrap( ~ name, scales = 'free_x') +
   geom_col() +
   rcartocolor::scale_fill_carto_d() +
-  labs(y = NULL, x = 'Number of codes', fill = NULL) +
+  guides(fill = FALSE) +
+  labs(y = NULL, x = NULL, fill = NULL) +
   theme_bw()
+
+    
+```
+
+
+## Comorbidities by Diagnosis
+
+```{r}
+UPENN_results$first_hosp_results$icd_tables$other_obfus_table
+```
+
+
+```{r}
+# scores_neuro %>% 
+#   distinct(patient_num, concept_code, `Neurological Disease Category`) %>%
+#   left_join(index_scores_elix %>% select(patient_num, elixhauser_score), by = "patient_num") %>%
+#   filter(!is.na(elixhauser_score)) %>% 
+#   ggplot(aes(y = concept_code, x = elixhauser_score, fill = concept_code)) + 
+#   facet_grid(rows = vars(`Neurological Disease Category`),
+#              scales = 'free', space = 'free') +
+#   geom_boxplot(alpha = 0.6) + 
+#   scale_fill_viridis_d(guide = FALSE, direction = -1) +
+#   labs(x = 'Elixhauser score', y = NULL) +
+#   NULL +
+#   theme(panel.grid = element_blank(),
+#         legend.title = element_text(),
+#         strip.text.y = element_text(angle = 0),
+#         panel.spacing.x = unit(10, "points"),
+#         panel.spacing.y = unit(0, "points"))
 ```
 
