@@ -12,9 +12,9 @@ library(gridExtra)
 library(ggpubr)
 library(DT)
 library(kableExtra)
-library(ggplot2)
-library(viridis)
-library(forcats)
+# library(ggplot2)
+# library(viridis)
+# library(forcats)
 library(cowplot)
 ```
 
@@ -334,22 +334,89 @@ age_plot <- ggplot(age_dx %>%
   theme_bw() + 
   theme(legend.position = "none") 
 
-sex_plot <- ggplot(combined_table %>%
-         filter(Demo_var == "sex"), 
-               aes(x = site, y = Count, group = site,
-                           fill = site)) + 
-  geom_bar(stat="identity", position = "dodge") + 
-  #coord_flip() +
-  scale_fill_viridis_d() + 
-  #rcartocolor::scale_fill_carto_d() +
-  #facet_wrap(~Dx, nrow = 1, scale = "fixed") + 
-  facet_grid(Dx~Demo_var_i, scale = "free_y") + 
-  xlab("") + 
-  ylab("") + 
-  theme_bw() + 
-  theme(legend.position = "none", 
-        axis.text.x = element_text(size = 8, angle = 45, hjust = 1)) 
 
+sex_plot <- combined_table %>%
+  filter(Demo_var == "sex") %>%
+  ggplot(aes(
+    x = site,
+    y = Count,
+    group = site,
+    fill = site
+  )) +
+  geom_bar(stat = "identity", position = "dodge") +
+  #coord_flip() +
+  scale_fill_viridis_d() +
+  #rcartocolor::scale_fill_carto_d() +
+  #facet_wrap(~Dx, nrow = 1, scale = "fixed") +
+  facet_grid(Dx ~ Demo_var_i, scale = "free_y") +
+  xlab("") +
+  ylab("") +
+  theme_bw() +
+  theme(legend.position = "none",
+        axis.text.x = element_text(
+          size = 8,
+          angle = 45,
+          hjust = 1
+        ))
+```
+
+
+```{r}
+
+showtext::showtext_auto()
+female <- intToUtf8(9792)
+male <- intToUtf8(9794)
+gender_count <- combined_table %>%
+  filter(Demo_var == "sex") %>% 
+  group_by(site, Demo_var_i) %>% 
+  summarise(total_count = sum(Count), .groups = 'drop')
+
+overall_plot <- gender_count %>% 
+  mutate(male_count = -male_count) %>% 
+  pivot_longer(- c(Country, num_patients_country)) %>% 
+  ggplot(aes(y = fct_relevel(Country, rev(countries)), 
+             x = value, color = name, 
+             fill = Country)) +
+  geom_col(position = 'identity') +
+  scale_color_manual(values = c('white', 'white')) +
+  scale_x_continuous(breaks = c(-5000, -2000, 0, 2000, 5000),
+                     labels = c(5000, 2000, 0, 2000, 5000),
+                     trans = ssqrt_trans) +
+  geom_vline(xintercept = 0, color = 'white') +
+  geom_text(data = . %>% filter(name == 'male_count'),
+            aes(y = Country, x = value - 22*sqrt(abs(value)), 
+                label = abs(value)), color = 'grey40', size = 3) +
+    geom_text(data = . %>% filter(name == 'female_count'),
+            aes(y = Country, x = value + 19*sqrt(abs(value)), 
+                label = abs(value)), color = 'grey40', size = 3) +
+  geom_text(data = filter(gender_count, Country == 'France'),
+            aes(y = 6, x = female_count - 600), fontface = 2,
+            label = female, size = 3, color = 'white') +
+  geom_text(data = filter(gender_count, Country == 'France'),
+            aes(y = 6, x = - male_count + 600), fontface = 2,
+            label = male, size = 3, color = 'white') +
+  labs(y = NULL, 
+       x = 'Number of male/female patients per country', 
+       fill = NULL) +
+  scale_fill_manual(values = colorBlindGrey6) +
+  theme(legend.position = 'None',
+        plot.margin = margin(15, 5.5, 15.5, 55.5),
+        axis.ticks.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.spacing.y = unit(0, 'pt'),
+        strip.background = element_blank(),
+        strip.placement = 'inside',
+        legend.background = element_blank(),
+        legend.key.height = unit(1, 'line'),
+        legend.title = element_text(hjust = 0, size = 9)) +
+  NULL
+```
+
+
+
+```{r echo=T, message=FALSE, warning=FALSE, results='hide'}
 surv_plot <- ggplot(combined_table %>%
          filter(Demo_var == "survival"), 
               aes(x = site, y = Count, group = site,
