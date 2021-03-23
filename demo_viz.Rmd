@@ -1,5 +1,5 @@
 ---
-title: "demo_figure"
+title: "Demo Figure"
 author: "Meg Hutch"
 date: "3/22/2021"
 output: html_document
@@ -24,15 +24,16 @@ load('results/UPENN_results.rda')
 load('results/UPitt_results.rda')
 load('results/APHP_results.rda')
 load('results/FRBDX_results.rda')
+load('results/ICSM_results.rda')
 ```
 
 ## Demographic Data
 
 ### Pre-processing
 
-```{r include=FALSE}
+```{r}
 demo_table_list <- list()
-results <- c("NWU_results", "UPENN_results", "UPitt_results", "APHP_results", "FRBDX_results")
+results <- c("NWU_results", "UPENN_results", "UPitt_results", "APHP_results", "FRBDX_results", "ICSM_results")
 
 for (i in results) { 
   tmp <- get(i)
@@ -41,7 +42,7 @@ for (i in results) {
   demo_table <- demo_table %>% select(site, everything())
   demo_table_list[[i]] <- demo_table
 }
-combined_table <- do.call(rbind.data.frame, demo_table_list)
+combined_table <- do.call(bind_rows, demo_table_list)
 
 # site level differences in variable names require tolower()
 combined_table <- combined_table %>%
@@ -58,7 +59,7 @@ n <- combined_table %>%
 
 n_all <-  n %>% 
   select(-variable) %>% 
-  colSums()  %>%
+  colSums(na.rm = TRUE)  %>%
   t() %>%
   as.data.frame() %>%
   mutate(variable = "All Patients")
@@ -67,7 +68,7 @@ n_all <-  n %>%
 n_female <- n %>% 
   filter(variable == "sex.female") %>% 
   select(-variable) %>% 
-  colSums()  %>%
+  colSums(na.rm = TRUE)  %>%
   t() %>%
   as.data.frame() %>%
   mutate(variable = "female")
@@ -75,7 +76,7 @@ n_female <- n %>%
 n_male <- n %>% 
   filter(variable == "sex.male") %>% 
   select(-variable) %>% 
-  colSums() %>% 
+  colSums(na.rm = TRUE) %>% 
   t() %>%
   as.data.frame() %>%
   mutate(variable = "male")
@@ -273,7 +274,7 @@ combined_table$Demo_var_i <-  recode(combined_table$Demo_var_i,
                                      alive = "Alive",
                                      deceased = "Deceased",
                                      `non-severe` = "Non-Severe",
-                                     severe = 'severe')
+                                     severe = 'Severe')
 ```
 
 ## Figures
