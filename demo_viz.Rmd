@@ -16,6 +16,8 @@ library(kableExtra)
 # library(viridis)
 # library(forcats)
 library(cowplot)
+theme_set(theme_bw() +
+            theme(panel.grid.minor = element_blank()))
 ```
 
 ```{r}
@@ -34,7 +36,7 @@ load('results/ICSM_results.rda')
 ```{r}
 demo_table_list <- list()
 results <- c("NWU_results", "UPENN_results", "UPitt_results", "APHP_results", "FRBDX_results", "ICSM_results")
-
+sites_wo_race <- c('APHP', 'FRBDX', 'ICSM')
 for (i in results) { 
   tmp <- get(i)
   demo_table <- tmp[["first_hosp_results"]][["cpns_results"]][["demo_table"]]
@@ -42,11 +44,15 @@ for (i in results) {
   demo_table <- demo_table %>% select(site, everything())
   demo_table_list[[i]] <- demo_table
 }
-combined_table <- do.call(bind_rows, demo_table_list)
+combined_table <- do.call(bind_rows, demo_table_list) %>% 
+  mutate(site = toupper(site))
 
 # site level differences in variable names require tolower()
 combined_table <- combined_table %>%
   mutate(variable = tolower(variable)) 
+
+# heatmap(UPENN_results$elix_mat) 
+
 ```
 
 ## Table One
@@ -229,6 +235,7 @@ kbl(tableOne_compiled) %>%
   pack_rows("Race & Ethnicty", 13, 19) %>%
   pack_rows("Readmission", 20, 21) %>%
   pack_rows("Deceased", 22, 23)
+
 ```
 
 ```{r fig.height=15, fig.width=11}
@@ -237,7 +244,8 @@ combined_table <- combined_table %>%
            Demo_var_i = sub(".*\\.", "", variable)) %>%
   pivot_longer(cols = c(n_var_None:n_var_Both),
                names_to = "Dx",
-               values_to = "Count")
+               values_to = "Count") %>% 
+  replace_na(list(Count = 0))
 
 combined_table$Dx <- recode(combined_table$Dx,
                             n_var_Both = "Both",
@@ -284,84 +292,16 @@ race_dx <- combined_table %>%
   filter(Demo_var == "race") %>%
   mutate(Demo_var_i = as.factor(Demo_var_i))
 
-race_plot <- ggplot(race_dx %>%
-         mutate(Demo_var_i = fct_relevel(Demo_var_i,
-                                         c("Hawaiian/Pacific Islander", 
-                                           "American Indian",
-                                           "Hispanic/Latino",
-                                           "Other", 
-                                           "Asian", 
-                                           "Black", 
-                                           "White"))),
-        aes(x = Demo_var_i, y = Count, group = site,
-                           fill = site)) + 
-  geom_bar(stat="identity", position = "dodge") + 
-  coord_flip() +
-  scale_fill_viridis_d() + 
-  #rcartocolor::scale_fill_carto_d() +
-  facet_wrap(~Dx, nrow = 1, scale = "free_x")  + 
-  xlab("") + 
-  ylab("") + 
-  theme_bw() + 
-  theme(legend.position = "none",
-        legend.title = element_text()) 
-
 age_dx <- combined_table %>% 
   filter(Demo_var == "age_group") %>%
   mutate(Demo_var_i = as.factor(Demo_var_i))
 
-age_plot <- ggplot(age_dx %>%
-         filter(Demo_var == "age_group") %>%
-         mutate(Demo_var_i = fct_relevel(Demo_var_i,
-                                         c("0-2",
-                                           "3-5",
-                                           "6-11",
-                                           "12-17",
-                                           "18-25",
-                                           "26-49",
-                                           "50-69",
-                                           "70-79",
-                                           "80+"))),
-               aes(x = Demo_var_i, y = Count, group = site,
-                           fill = site)) + 
-  geom_bar(stat="identity", position = "dodge") + 
-  coord_flip() +
-  scale_fill_viridis_d() + 
-  #rcartocolor::scale_fill_carto_d() +
-  facet_wrap(~Dx, nrow = 1, scale = "free_x") + 
-  xlab("") + 
-  ylab("") + 
-  theme_bw() + 
-  theme(legend.position = "none") 
-
-
-sex_plot <- combined_table %>%
-  filter(Demo_var == "sex") %>%
-  ggplot(aes(
-    x = site,
-    y = Count,
-    group = site,
-    fill = site
-  )) +
-  geom_bar(stat = "identity", position = "dodge") +
-  #coord_flip() +
-  scale_fill_viridis_d() +
-  #rcartocolor::scale_fill_carto_d() +
-  #facet_wrap(~Dx, nrow = 1, scale = "fixed") +
-  facet_grid(Dx ~ Demo_var_i, scale = "free_y") +
-  xlab("") +
-  ylab("") +
-  theme_bw() +
-  theme(legend.position = "none",
-        axis.text.x = element_text(
-          size = 8,
-          angle = 45,
-          hjust = 1
-        ))
 ```
 
 
-```{r}
+```{r gender-plot} 
+sorted_sites <- rev(c("APHP", "FRBDX", "ICSM", "NWU", "UPENN", "UPITT"))
+colorBlindGrey6 <- c("#0072B2", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#CC79A7")
 
 showtext::showtext_auto()
 female <- intToUtf8(9792)
@@ -369,38 +309,35 @@ male <- intToUtf8(9794)
 gender_count <- combined_table %>%
   filter(Demo_var == "sex") %>% 
   group_by(site, Demo_var_i) %>% 
-  summarise(total_count = sum(Count), .groups = 'drop')
+  summarise(total_count = sum(Count, na.rm = TRUE), .groups = 'drop')
 
-overall_plot <- gender_count %>% 
-  mutate(male_count = -male_count) %>% 
-  pivot_longer(- c(Country, num_patients_country)) %>% 
-  ggplot(aes(y = fct_relevel(Country, rev(countries)), 
-             x = value, color = name, 
-             fill = Country)) +
-  geom_col(position = 'identity') +
+gender_plot <- gender_count %>% 
+  mutate(total_count = if_else(Demo_var_i == 'Male', - total_count, total_count)) %>%
+  ggplot(aes(y = fct_relevel(site, sorted_sites), 
+             x = total_count, color = Demo_var_i)) +
+  geom_col(position = 'identity', fill = 'grey70') +
   scale_color_manual(values = c('white', 'white')) +
-  scale_x_continuous(breaks = c(-5000, -2000, 0, 2000, 5000),
-                     labels = c(5000, 2000, 0, 2000, 5000),
-                     trans = ssqrt_trans) +
+  scale_x_continuous(breaks = c(-10000, -5000, -2000, 0, 2000, 5000),
+                     labels = c(10000, 5000, 2000, 0, 2000, 5000),
+                     trans = ggallin::ssqrt_trans) +
   geom_vline(xintercept = 0, color = 'white') +
-  geom_text(data = . %>% filter(name == 'male_count'),
-            aes(y = Country, x = value - 22*sqrt(abs(value)), 
-                label = abs(value)), color = 'grey40', size = 3) +
-    geom_text(data = . %>% filter(name == 'female_count'),
-            aes(y = Country, x = value + 19*sqrt(abs(value)), 
-                label = abs(value)), color = 'grey40', size = 3) +
-  geom_text(data = filter(gender_count, Country == 'France'),
-            aes(y = 6, x = female_count - 600), fontface = 2,
+  geom_text(data = . %>% filter(Demo_var_i == 'Male'),
+            aes(y = site, x = total_count - 22*sqrt(abs(total_count)),
+                label = abs(total_count)), color = 'grey10', size = 3) +
+    geom_text(data = . %>% filter(Demo_var_i == 'Female'),
+            aes(y = site, x = total_count + 19*sqrt(abs(total_count)),
+                label = abs(total_count)), color = 'grey10', size = 3) +
+  geom_text(data = . %>% filter(site == 'APHP', Demo_var_i == 'Female'),
+            aes(y = length(sorted_sites), x = total_count - 600), fontface = 2,
             label = female, size = 3, color = 'white') +
-  geom_text(data = filter(gender_count, Country == 'France'),
-            aes(y = 6, x = - male_count + 600), fontface = 2,
+  geom_text(data = . %>% filter(site == 'APHP', Demo_var_i == 'Male'),
+            aes(y = length(sorted_sites), x = total_count + 600), fontface = 2,
             label = male, size = 3, color = 'white') +
   labs(y = NULL, 
-       x = 'Number of male/female patients per country', 
+       x = 'Number of male/female patients per site', 
        fill = NULL) +
-  scale_fill_manual(values = colorBlindGrey6) +
   theme(legend.position = 'None',
-        plot.margin = margin(15, 5.5, 15.5, 55.5),
+        # plot.margin = margin(15, 5.5, 15.5, 55.5),
         axis.ticks.y = element_blank(),
         panel.grid.major.y = element_blank(),
         panel.grid.minor = element_blank(),
@@ -414,38 +351,133 @@ overall_plot <- gender_count %>%
   NULL
 ```
 
+```{r age-plot}
+age_sum <- age_dx %>%
+  filter(Demo_var == "age_group") %>%
+  mutate(Demo_var_i = fct_relevel(
+    Demo_var_i,
+    c(
+      "0-2",
+      "3-5",
+      "6-11",
+      "12-17",
+      "18-25",
+      "26-49",
+      "50-69",
+      "70-79",
+      "80+"
+    )
+  )) %>%
+  select(site, Demo_var_i, Dx, Count) %>%
+  distinct() %>%
+  group_by(site, Demo_var_i) %>%
+  summarise(total_count = sum(Count, na.rm = TRUE),
+            .groups = 'drop') %>%
+  group_by(site) %>%
+  mutate(freq = total_count / sum(total_count, na.rm = TRUE))
 
+cc <- scales::seq_gradient_pal("white", "#25796C")(seq(0,1,length.out = 10))[-1]
+
+age_plot <- age_sum %>% 
+ ggplot(aes(y = fct_relevel(site, sorted_sites), 
+            x = freq, fill = fct_rev(Demo_var_i))) + 
+  geom_col() +
+  # scale_fill_viridis_d(direction = -1, option = 'D') + 
+  scale_fill_manual(values = cc) +
+  scale_x_continuous(labels = scales::percent_format()) +
+  labs(x = 'Age group proportion', y = NULL, fill = NULL) +
+  guides(fill = guide_legend(nrow = 1, reverse = TRUE)) +
+  coord_cartesian(expand = FALSE) +
+  theme(legend.position = "top") +
+  theme(panel.grid = element_blank(),
+        legend.key.height = unit(3, 'mm')) +
+  NULL
+```
+
+
+```{r race-plot}
+race_sum <- race_dx %>%
+  mutate(Demo_var_i = fct_relevel(
+    Demo_var_i,
+    c(
+      "Hawaiian/Pacific Islander",
+      "American Indian",
+      "Hispanic/Latino",
+      "Other",
+      "Asian",
+      "Black",
+      "White"
+    )
+  )) %>%
+  filter(Demo_var == "race", !site %in% sites_wo_race) %>%
+  select(site, Demo_var_i, Dx, Count) %>%
+  distinct() %>%
+  group_by(site, Demo_var_i) %>%
+  summarise(total_count = sum(Count, na.rm = TRUE),
+            .groups = 'drop') %>%
+  group_by(site) %>%
+  mutate(freq = total_count / sum(total_count, na.rm = TRUE))
+
+race_plot <- race_sum %>%
+  ggplot(aes(y = fct_relevel(site, sorted_sites), 
+             x = freq, fill = fct_rev(Demo_var_i))) + 
+  geom_col() +
+  rcartocolor::scale_fill_carto_d(palette = 6) +
+  scale_x_continuous(labels = scales::percent_format()) +
+  labs(x = 'Race/ethnic group proportion', y = NULL, fill = NULL) +
+  guides(fill = guide_legend(nrow = 1, reverse = TRUE)) +
+  coord_cartesian(expand = FALSE) +
+  theme(legend.position = "top") +
+  theme(panel.grid = element_blank(),
+        legend.key.height = unit(3, 'mm')) +
+  NULL
+```
+
+```{r combine-plots, fig.height=7, fig.width=9}
+cowplot::plot_grid(gender_plot, age_plot, race_plot, ncol = 1,
+                   rel_heights = c(1, 1.1, 0.75))
+```
 
 ```{r echo=T, message=FALSE, warning=FALSE, results='hide'}
-surv_plot <- ggplot(combined_table %>%
-         filter(Demo_var == "survival"), 
-              aes(x = site, y = Count, group = site,
-                           fill = site)) + 
-  geom_bar(stat="identity", position = "dodge") + 
-  #coord_flip() +
-  #rcartocolor::scale_fill_carto_d() +
-  scale_fill_viridis_d() + 
-  facet_grid(Dx~Demo_var_i, scale = "free_y") + 
-  xlab("") + 
-  ylab("") + 
-  theme_bw() + 
-  theme(legend.position = "none",
-        axis.text.x = element_text(size = 8, angle = 45, hjust = 1)) 
+neuro_types <- c('None', 'Central', 'Peripheral', 'Both')
 
-severity_plot <- ggplot(combined_table %>%
-         filter(Demo_var == "severity"), 
-               aes(x = site, y = Count, group = site,
-                           fill = site)) + 
-  geom_bar(stat="identity", position = "dodge") + 
-  #coord_flip() +
-  #rcartocolor::scale_fill_carto_d() +
-  scale_fill_viridis_d() + 
-  facet_grid(Dx~Demo_var_i, scale = "free_y") + 
-  xlab("") + 
-  ylab("") + 
-  theme_bw() + 
-  theme(legend.position = "none",
-        axis.text.x = element_text(size = 8, angle = 45, hjust = 1)) 
+surv_plot <- combined_table %>%
+  filter(Demo_var == "survival") %>%
+    mutate(Dx = gsub('n_var_', '', Dx) %>% fct_relevel(neuro_types)) %>% 
+  ggplot(aes(
+    x = Dx,
+    y = Count,
+    fill = Demo_var_i
+  )) +
+  # geom_violin(alpha = 0.2) +
+  geom_point(color = 'white', shape = 21, size = 3) +
+  scale_fill_manual(values =  c('#FFE3CB', '#E58605')) +
+  facet_wrap(~ Demo_var_i, scale = "free_y", nrow = 1) +
+  xlab("") +
+  ylab("") +
+  theme_bw() +
+  theme(legend.position = "none") +
+    NULL
+
+# scales::seq_gradient_pal("white", '#CC61AF')(seq(0,1,length.out = 10))[-1]
+severity_plot <- 
+  combined_table %>%
+  filter(Demo_var == "severity") %>%
+    mutate(Dx = gsub('n_var_', '', Dx) %>% fct_relevel(neuro_types)) %>% 
+  ggplot(aes(
+    x = Demo_var_i,
+    y = Count,
+    fill = Demo_var_i
+  )) +
+  # geom_violin(alpha = 0.2) +
+  geom_point(color = 'white', shape = 21, size = 3) +
+  scale_fill_manual(values = c('#F6DCED', '#CC61AF')) +
+  facet_wrap(~ Dx, scale = "free_y", nrow = 1) +
+  xlab("") +
+  ylab("") +
+  theme_bw() +
+  theme(legend.position = "none") +
+    NULL
 
 readmit_plot <- ggplot(combined_table %>%
          filter(Demo_var == "readmitted") %>% 
@@ -473,13 +505,52 @@ legend_b <- get_legend(
 )
 ```
 
-```{r fig.height=14, fig.width=10, message=FALSE, warning=FALSE}
-# Arrange plots
-p1 <- plot_grid(sex_plot, age_plot, labels=c("A", "B"), ncol = 2, nrow = 1)
-p2 <- plot_grid(race_plot, labels = c("C"), ncol = 1)
-p3 <- plot_grid(readmit_plot, severity_plot, surv_plot, labels = c("D", "E", "F"), ncol = 3, nrow = 1)
-plot_combined <- plot_grid(legend_b, p1, p2, p3, nrow = 4, ncol = 1, rel_heights = c(0.5,2,2,2))
-plot_combined
+```{r}
+combined_table %>% 
+  filter(Demo_var_i == 'Alive') %>% 
+  select(site, starts_with('prop')) %>% 
+  distinct() %>% 
+  pivot_longer(- site) %>% 
+  mutate(name = gsub('prop_', '', name) %>% fct_relevel(neuro_types)) %>% 
+  ggplot(aes(x = name, y = value, group = site, color = site)) +
+    geom_point() +
+  geom_line() +
+  scale_y_continuous(limits = c(0,1)) +
+  labs(x = NULL, y = 'Proportion survived') +
+  NULL
+
+combined_table %>% 
+  filter(Demo_var_i == 'Alive') %>% 
+  select(site, starts_with('prop')) %>% 
+  distinct() %>% 
+  pivot_longer(- site) %>% 
+  mutate(name = gsub('prop_', '', name) %>% fct_relevel(neuro_types)) %>% 
+  ggplot(aes(x = name, y = value)) +
+  geom_boxplot() +
+    geom_point() +
+  scale_y_continuous(limits = c(0,1)) +
+  labs(x = NULL, y = 'Proportion survived') +
+  NULL
+
+combined_table %>% 
+  filter(Demo_var_i == 'Severe') %>% 
+  select(site, starts_with('prop')) %>% 
+  distinct() %>% 
+  pivot_longer(- site) %>% 
+  mutate(name = gsub('prop_', '', name) %>% fct_relevel(neuro_types)) %>%
+  ggplot(aes(x = name, y = value)) +
+  geom_boxplot() +
+    geom_point() +
+  scale_y_continuous(limits = c(0,1)) +
+  labs(x = NULL, y = 'Proportion severe') +
+  NULL
 ```
 
+point size = count?
 
+```{r message=FALSE, warning=FALSE, fig.width=10}
+# Arrange plots
+# p1 <- plot_grid(sex_plot, age_plot, labels=c("A", "B"), ncol = 2, nrow = 1)
+# p2 <- plot_grid(race_plot, labels = c("C"), ncol = 1)
+plot_grid(severity_plot, surv_plot, labels = c("E", "F"), ncol = 2, nrow = 1)
+```
