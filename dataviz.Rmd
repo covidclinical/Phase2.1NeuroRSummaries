@@ -11,7 +11,16 @@ library(meta)
 ```{r}
 load('results/NWU_results.rda')
 load('results/UPENN_results.rda')
+
+
 ```
+
+```{r}
+lapply(APHP_results, function(x) format(object.size(x), 'Mb'))
+lapply(UPENN_results$first_hosp_results, function(x) format(object.size(x), 'Mb'))
+file.info('results/UPENN_results.rda')
+```
+
 
 ```{r}
 heatmap(NWU_results$elix_mat)
