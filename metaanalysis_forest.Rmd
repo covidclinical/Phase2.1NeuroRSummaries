@@ -1,0 +1,332 @@
+---
+title: "Metaanalysis"
+output: html_document
+---
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(meta)
+library(gridGraphics)
+library(gridExtra)
+library(ggpubr)
+library(DT)
+library(kableExtra)
+library(gridExtra)
+library(tidyverse)
+library(patchwork)
+library(stringr)
+```
+
+```{r}
+load('results/NWU_results.rda')
+load('results/UPENN_results.rda')
+load('results/UPITT_results.rda')
+load('results/APHP_results.rda')
+load('results/FRBDX_results.rda')
+load('results/ICSM_results.rda')
+```
+
+## Conduct Random-Effects Meta-Analysis
+
+Here we conduct meta-analysis on outcomes occuring within the first hospital stay.
+
+```{r}
+get_site <- function(x){
+  x$site
+}
+
+get_result_row <- function(df,
+                           outcome = 'n_stay_reg_elix',
+                           period = 'first_hosp_results',
+                           neuro_type = 'cpns_results',
+                           neuro_chr = 'neuro_postCentral') {
+  # neuro_chr <- switch(neuro_type,
+  #   cpns_results = 'neuro_postPeripheral',
+  #   binary_results = 'neuro_postneuro_cond'
+  # )
+  df[[c(period, neuro_type, outcome, 'coefficients')]] %>%
+    as.data.frame() %>%
+    rownames_to_column('term') %>%
+    mutate(site = get_site(df)) %>%
+    filter(grepl(neuro_chr, term))
+}
+
+outcomes <-
+  c(
+    "n_stay_reg_elix",
+    "severe_reg_elix",
+    "deceased_reg_elix",
+    "n_readmit_reg_elix",
+    "readmit_reg_elix",
+    "time_severe_reg_elix",
+    "time_deceased_reg_elix",
+    "time_readmit_reg_elix" 
+  )
+
+meta_results <- list()
+for (outcome_i in outcomes) {
+  meta_results[[outcome_i]] <-
+    list(NWU_results, UPENN_results, UPITT_results, 
+         APHP_results, ICSM_results, FRBDX_results) %>% # add other results here
+    lapply(get_result_row, outcome = outcome_i) %>%
+    bind_rows() %>%
+    metagen(
+      Estimate,
+      `Std. Error`,
+      data = .,
+      sm = 'MD',
+      comb.random = TRUE,
+      comb.fixed = FALSE,
+      #method.tau = "SJ",
+      hakn = FALSE,
+      prediction=TRUE,
+      studlab = site
+      
+    )
+}
+```
+
+```{r}
+ma_combine = list()
+
+for (i in names(meta_results)) {
+  TE = meta_results[[i]][["TE"]]
+  seTE = meta_results[[i]][["seTE"]]
+  studlab = meta_results[[i]][["studlab"]]
+  Weight = meta_results[[i]][["w.random"]]
+  upper = meta_results[[i]][["upper"]]
+  lower = meta_results[[i]][["lower"]]
+  analysis = paste(i)
+  df <- cbind(studlab, TE, seTE, Weight, upper, lower, analysis)
+  ma_combine[[i]] <- df
+}
+
+combined_results <- do.call(rbind.data.frame, ma_combine)
+combined_results$TE <- as.numeric(as.character(combined_results$TE))
+combined_results$seTE <- as.numeric(as.character(combined_results$seTE))
+combined_results$Weight <- as.numeric(as.character(combined_results$Weight))
+combined_results$upper <- as.numeric(as.character(combined_results$upper))
+combined_results$lower <- as.numeric(as.character(combined_results$lower))
+
+
+combined_results <- combined_results %>% mutate(TE = round(TE,2),
+                                                seTE = round(seTE,4),
+                                                Weight = round(Weight,1),
+                                                CI.High = round(upper, 1),
+                                                CI.Low = round(lower, 1),
+                                                CI = paste("(", CI.Low, ",", CI.High, ")")) %>%
+  select(-upper, -lower) %>%
+  rename("Site" = studlab, 
+         "Estimate" = TE)
+                                                
+
+
+# Record analysis name to look nicer
+combined_results$analysis <- recode(combined_results$analysis,
+                                    'n_stay_reg_elix' = 'Length of Stay',
+                                    'severe_reg_elix' = 'Severe COVID-19',
+                                    'deceased_reg_elix' = 'Mortality',
+                                    'n_readmit_reg_elix' = 'Number of Readmissions',
+                                    'readmit_reg_elix' = 'Readmission',
+                                    'time_severe_reg_elix' = 'Time to Severity',
+                                    'time_deceased_reg_elix' = 'Time to Mortality',
+                                    'time_readmit_reg_elix' = 'Time to Readmission')
+```
+
+Add blank rows to facilitate formatting
+
+```{r}
+df_new <- as.data.frame(lapply(combined_results, as.character), stringsAsFactors = FALSE)
+combined_results <- head(do.call(rbind, by(df_new, combined_results$analysis, rbind, "")), -1 )
+
+combined_results <- combined_results %>% 
+  add_row(.before = 1)
+```
+
+hide NA values using a space
+```{r}
+combined_results[is.na(combined_results)] <- ""
+```
+
+Carry over name of the analysis to the blank row
+
+```{r}
+combined_results$Site <- as.character(combined_results$Site)
+combined_results$analysis <- as.character(combined_results$analysis)
+
+combined_results <- combined_results %>% 
+  mutate(Site = if_else(Site == "", lead(analysis), Site)) %>%
+  select(-analysis) %>%
+  rename("Analysis" = Site)
+```
+
+```{r}
+combined_results$Estimate <- as.numeric(as.character(combined_results$Estimate))
+combined_results$seTE <- as.numeric(as.character(combined_results$seTE))
+combined_results$Weight <- as.numeric(as.character(combined_results$Weight))
+combined_results$CI.High <- as.numeric(as.character(combined_results$CI.High))
+combined_results$CI.Low <- as.numeric(as.character(combined_results$CI.Low))
+```
+
+Indent site results
+
+```{r}
+combined_results$Analysis <- ifelse(is.na(combined_results$Estimate),
+                         combined_results$Analysis,
+                         paste0("   ", combined_results$Analysis))
+```
+
+```{r}
+# remove ICSM for severity (wicked high estimates!)
+# remove ICCM, APHP for readmission
+binary_results <- combined_results[c(27:30, 33, 8:12,14:19),]
+
+#combined_results <- tibble::rownames_to_column(combined_results, "model")
+
+#binary_results <- combined_results %>% 
+#  filter(str_detect(model, '\\b(Severe|Mortality|Readmission)\\b'),
+#         !str_detect(model, '\\b(Time)\\b'))
+```
+
+## Readmission, Severity, & Mortality
+
+**Notes:**
+
+* remove ICSM for severity - high standard error
+* ICCM, APHP for readmission - high estimates (~19, ~22)
+
+```{r message=FALSE, warning=FALSE}
+devtools::install_github("rdboyes/forester")
+library(forester)
+
+binary_results[is.na(binary_results)] <- ""
+
+binary_results$Estimate <- as.numeric(as.character(binary_results$Estimate))
+binary_results$seTE <- as.numeric(as.character(binary_results$seTE))
+binary_results$Weight <- as.numeric(as.character(binary_results$Weight))
+binary_results$CI.High <- as.numeric(as.character(binary_results$CI.High))
+binary_results$CI.Low <- as.numeric(as.character(binary_results$CI.Low))
+binary_results$CI <- as.numeric(as.character(binary_results$CI))
+
+forester(left_side_data = binary_results[1],
+         estimate = binary_results$Estimate,
+         ci_low = binary_results$CI.Low,
+         ci_high = binary_results$CI.High,
+         display = TRUE,
+         font_family = "arial",
+         arrows = TRUE, 
+         arrow_labels = c("Decreased Risk", "Increased Risk"),
+         xlim = c(-1,3),
+         xbreaks = c(-1, 0, 3),
+         file_path = here::here("readmission_severity_mortality.png"))
+```
+
+## Time to Events
+
+```{r message=FALSE, warning=FALSE}
+time_results <- combined_results[c(34:44),]
+
+time_results[is.na(time_results)] <- ""
+
+time_results$Estimate <- as.numeric(as.character(time_results$Estimate))
+time_results$seTE <- as.numeric(as.character(time_results$seTE))
+time_results$Weight <- as.numeric(as.character(time_results$Weight))
+time_results$CI.High <- as.numeric(as.character(time_results$CI.High))
+time_results$CI.Low <- as.numeric(as.character(time_results$CI.Low))
+time_results$CI <- as.numeric(as.character(time_results$CI))
+
+forester(left_side_data = time_results[1],
+         estimate = time_results$Estimate,
+         ci_low = time_results$CI.Low,
+         ci_high = time_results$CI.High,
+         display = TRUE,
+         font_family = "arial",
+         arrows = TRUE, 
+         arrow_labels = c("Decreased Time", "Increased Time"),
+         xlim = c(-2,12),
+         xbreaks = c(-2, 0, 12),
+         file_path = here::here("time_to_events.png"))
+```
+
+```{r message=FALSE, warning=FALSE}
+time_results2 <- combined_results[c(45:51),]
+
+time_results2[is.na(time_results2)] <- ""
+
+time_results2$Estimate <- as.numeric(as.character(time_results2$Estimate))
+time_results2$seTE <- as.numeric(as.character(time_results2$seTE))
+time_results2$Weight <- as.numeric(as.character(time_results2$Weight))
+time_results2$CI.High <- as.numeric(as.character(time_results2$CI.High))
+time_results2$CI.Low <- as.numeric(as.character(time_results2$CI.Low))
+time_results2$CI <- as.numeric(as.character(time_results2$CI))
+
+forester(left_side_data = time_results2[1],
+         estimate = time_results2$Estimate,
+         ci_low = time_results2$CI.Low,
+         ci_high = time_results2$CI.High,
+         display = TRUE,
+         font_family = "arial",
+         arrows = TRUE, 
+         arrow_labels = c("Decreased Time", "Increased Time"),
+         xlim = c(-44,38),
+         xbreaks = c(-44, 0, 38),
+         file_path = here::here("time_to_events.png"))
+```
+
+## Length Stay
+
+**Notes:**
+
+* removed ICSM, APHP (high estimates - 17.8, 19.8)
+
+```{r message=FALSE, warning=FALSE}
+day_results <- combined_results[c(1:4,7),]
+
+day_results[is.na(day_results)] <- ""
+
+day_results$Estimate <- as.numeric(as.character(day_results$Estimate))
+day_results$seTE <- as.numeric(as.character(day_results$seTE))
+day_results$Weight <- as.numeric(as.character(day_results$Weight))
+day_results$CI.High <- as.numeric(as.character(day_results$CI.High))
+day_results$CI.Low <- as.numeric(as.character(day_results$CI.Low))
+day_results$CI <- as.numeric(as.character(day_results$CI))
+
+forester(left_side_data = day_results[1],
+         estimate = day_results$Estimate,
+         ci_low = day_results$CI.Low,
+         ci_high = day_results$CI.High,
+         display = TRUE,
+         font_family = "arial",
+         arrows = TRUE, 
+         arrow_labels = c("Decreased Length", "Increased Length"),
+         xlim = c(-1,12),
+         xbreaks = c(-1, 0, 12),
+         file_path =here::here("length_of_stay.png"))
+```
+
+## Days to Readmission
+
+```{r message=FALSE, warning=FALSE}
+nday_results <- combined_results[20:27,]
+
+nday_results[is.na(nday_results)] <- ""
+
+nday_results$Estimate <- as.numeric(as.character(nday_results$Estimate))
+nday_results$seTE <- as.numeric(as.character(nday_results$seTE))
+nday_results$Weight <- as.numeric(as.character(nday_results$Weight))
+nday_results$CI.High <- as.numeric(as.character(nday_results$CI.High))
+nday_results$CI.Low <- as.numeric(as.character(nday_results$CI.Low))
+nday_results$CI <- as.numeric(as.character(nday_results$CI))
+
+forester(left_side_data = nday_results[1],
+         estimate = nday_results$Estimate,
+         ci_low = nday_results$CI.Low,
+         ci_high = nday_results$CI.High,
+         display = TRUE,
+         font_family = "arial",
+         arrows = TRUE, 
+         arrow_labels = c("Decreased Length", "Increased Length"),
+         xlim = c(-1,2),
+         xbreaks = c(-1, 0, 2),
+         file_path = here::here("n_readmissions.png"))
+```
