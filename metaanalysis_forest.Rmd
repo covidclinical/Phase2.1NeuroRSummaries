@@ -86,6 +86,8 @@ for (outcome_i in outcomes) {
 }
 ```
 
+_Note_: We will probably want to examine PNS and Both later.
+
 ```{r}
 ma_combine = list()
 

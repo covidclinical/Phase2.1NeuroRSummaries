@@ -78,7 +78,6 @@ combined_table_wide <- bind_rows(demo_table_list) %>%
 # heatmap(UPITT_results$elix_mat)
 ```
 
-_Note_: We will probably want to examine PNS and Both later.
 
 ## Table One
 
