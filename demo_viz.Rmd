@@ -25,9 +25,13 @@ for (rda in rdas)
   load(rda)
 
 rm(rdas, rda)
-results <- ls()
-
+sorted_sites <- rev(c("APHP", "FRBDX", "HPG23", "ICSM",  
+                      "MGB", "NWU", "UPENN", "UPITT"))
 sites_wo_race <- c('APHP', 'FRBDX', 'ICSM', 'HPG23')
+# colorBlindGrey6 <- 
+#   c("#0072B2", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#CC79A7")
+
+results <- paste(sorted_sites, 'results', sep = '_')
 ```
 
 ## Demographic Data
@@ -39,250 +43,109 @@ demo_table_list <- list()
 
 for (i in results) { 
   tmp <- get(i)
-  demo_table <- tmp[["first_hosp_results"]][["cpns_results"]][["demo_table"]]
-  demo_table <- as.data.frame(demo_table)
-  demo_table <- demo_table %>% select(site, everything())
-  demo_table_list[[i]] <- demo_table
+  demo_table_list[[i]] <- tmp[[c("first_hosp_results",
+                                 "cpns_results",
+                                 "demo_table")]] %>% 
+    select(site, everything())
 }
-combined_table <- do.call(bind_rows, demo_table_list) %>% 
-  mutate(site = toupper(site))
-
-# site level differences in variable names require tolower()
-combined_table <- combined_table %>%
-  mutate(variable = tolower(variable)) 
+combined_table_wide <- bind_rows(demo_table_list) %>%
+  # site level differences in variable names require tolower()
+  mutate(
+    site = toupper(site),
+    variable = tolower(variable),
+    Demo_var = sub("\\..*", "", variable),
+    Demo_var_i = sub(".*\\.", "", variable) %>% 
+      gsub('_', ' ', .) %>% 
+      str_to_title() %>% 
+      recode(
+        `00to02`  = "0-2",
+        `03to05` = "3-5",
+        `06to11` = "6-11",
+        `12to17` = "12-17",
+        `18to25` = "18-25",
+        `26to49` = "26-49",
+        `50to69` = "50-69",
+        `70to79` = "70-79",
+        `80plus` = "80+",
+        race.white = "White",
+        race.american_indian = "American Indian",
+        `Hawaiian Pacific Islander` = "Hawaiian/Pacific Islander",
+        `Hispanic Latino` = "Hispanic/Latino",
+        `False` = "Not Readmitted",
+        `True` = "Readmitted")
+  )
 
 # heatmap(UPITT_results$elix_mat)
 ```
 
+_Note_: We will probably want to examine PNS and Both later.
+
 ## Table One
 
 ```{r}
-## Add total Patients
-n <- combined_table %>% 
-  filter(variable == "sex.female" | variable == "sex.male") %>%
-  select(variable, n_var_None, n_var_Peripheral, n_var_Central, n_var_Both)
+ordered_vars <- c("all", "sex", "age_group", "race", 
+                  "readmitted", "severity", "survival")
+tableOne_inter <- combined_table_wide %>% 
+  group_by(variable, Demo_var, Demo_var_i) %>% 
+  summarise(across(starts_with('n_var'), 
+                   function(x) sum(x, na.rm = TRUE)))
 
-n_all <-  n %>% 
-  select(-variable) %>% 
-  colSums(na.rm = TRUE)  %>%
-  t() %>%
-  as.data.frame() %>%
-  mutate(variable = "All Patients")
-
-## Gender
-n_female <- n %>% 
-  filter(variable == "sex.female") %>% 
-  select(-variable) %>% 
-  colSums(na.rm = TRUE)  %>%
-  t() %>%
-  as.data.frame() %>%
-  mutate(variable = "female")
-
-n_male <- n %>% 
-  filter(variable == "sex.male") %>% 
-  select(-variable) %>% 
-  colSums(na.rm = TRUE) %>% 
-  t() %>%
-  as.data.frame() %>%
-  mutate(variable = "male")
-
-## Age
-age_vars <- combined_table %>% 
-  filter(stringr::str_detect(variable, 'age')) %>%
-  distinct(variable) %>%
-  arrange(variable)
-
-age_sums_list <- list()
-
-for (i in age_vars$variable) {
-  table_age_sums <- combined_table %>%
-    filter(variable == paste(i)) %>%
-    select(n_var_None, n_var_Peripheral, n_var_Central, n_var_Both) %>%
-    colSums(na.rm = TRUE) %>%
-    t() %>%
-    as.data.frame() %>%
-    mutate(variable = paste(i))
-  age_sums_list[[i]] <- table_age_sums
-}
-n_age <- do.call(rbind.data.frame, age_sums_list)
-
-## Race
-race_vars <- combined_table %>% 
-  filter(stringr::str_detect(variable, 'race')) %>%
-  arrange(site) %>%
-  distinct(variable) 
-
-race_sums_list <- list()
-
-for (i in race_vars$variable) {
-  table_race_sums <- combined_table %>%
-    filter(variable == paste(i)) %>%
-    select(n_var_None, n_var_Peripheral, n_var_Central, n_var_Both) %>%
-    colSums(na.rm = TRUE) %>%
-    t() %>%
-    as.data.frame() %>%
-    mutate(variable = paste(i))
-  race_sums_list[[i]] <- table_race_sums
-}
-n_race <- do.call(rbind.data.frame, race_sums_list)
-
-## Readmitted
-readmit_vars <- combined_table %>% 
-  filter(stringr::str_detect(variable, 'readmitted')) %>%
-  distinct(variable) 
-
-readmit_sums_list <- list()
-
-for (i in readmit_vars$variable) {
-  table_readmit_sums <- combined_table %>%
-    filter(variable == paste(i)) %>%
-    select(n_var_None, n_var_Peripheral, n_var_Central, n_var_Both) %>%
-    colSums(na.rm = TRUE) %>%
-    t() %>%
-    as.data.frame() %>%
-    mutate(variable = paste(i))
-  readmit_sums_list[[i]] <- table_readmit_sums
-}
-n_readmit <- do.call(rbind.data.frame, readmit_sums_list)
-
-## Death
-death_vars <- combined_table %>% 
-  filter(stringr::str_detect(variable, 'survival')) %>%
-  distinct(variable) 
-
-death_sums_list <- list()
-
-for (i in death_vars$variable) {
-  table_death_sums <- combined_table %>%
-    filter(variable == paste(i)) %>%
-    select(n_var_None, n_var_Peripheral, n_var_Central, n_var_Both) %>%
-    colSums(na.rm = TRUE)  %>%
-    t() %>%
-    as.data.frame() %>%
-    mutate(variable = paste(i))
-  death_sums_list[[i]] <- table_death_sums
-}
-n_death <- do.call(rbind.data.frame, death_sums_list)
-
-tableOne_compiled <- rbind(n_all, 
-                           n_female, 
-                           n_male,
-                           n_age,
-                           n_race,
-                           n_readmit,
-                           n_death) %>%
-  rename("Table 1" = variable,
-         "None" = n_var_None,
-         "PNS" = n_var_Peripheral,
-         "CNS" = n_var_Central,
-         "Both" = n_var_Both)
-
-dx_vars = c("None", "PNS", "CNS", "Both")
-n_list = list()
-for(i in (dx_vars)) {
-  n_sample <- tableOne_compiled %>%
-  filter(`Table 1` == "All Patients") %>%
-  select(i)
-  n_list[[i]] <- n_sample
-}
-n_list <- do.call(cbind.data.frame, n_list)
-
-tableOne_compiled <- tableOne_compiled %>%
+tableOne_compiled <- tableOne_inter %>% 
+  ungroup() %>% 
+  filter(Demo_var == 'sex') %>% 
+  summarise(across(where(is.numeric), sum)) %>% 
+  data.frame(
+    variable = 'all',
+    Demo_var = 'all',
+             Demo_var_i = 'All Patients',
+             .) %>% 
+  bind_rows(tableOne_inter) %>%
   mutate(N = rowSums(across(where(is.numeric))),
-         None_perc = round(None/n_list$None*100, 1),
-         PNS_perc = round(PNS/n_list$PNS*100, 1),
-         CNS_perc = round(CNS/n_list$CNS*100, 1),
-         Both_perc = round(Both/n_list$Both*100, 1),
-         None = paste(None, "(", None_perc, "%", ")"),
-         PNS = paste(PNS, "(", PNS_perc, "%", ")"),
-         CNS = paste(CNS, "(", CNS_perc, "%", ")"),
-         Both = paste(Both, "(", Both_perc, "%", ")")) %>%
-  select(`Table 1`, N, None, CNS, PNS, Both, -None_perc, -PNS_perc, -CNS_perc, -Both_perc) 
-
-rownames(tableOne_compiled) <- NULL
-
-# recode names of variables
-tableOne_compiled$`Table 1` <-  recode(tableOne_compiled$`Table 1`,
-                                         female = "Female",
-                                         male = "Male",
-                                         age_group.00to02  = "0-2",
-                                         age_group.03to05 = "3-5",
-                                         age_group.06to11 = "6-11",
-                                         age_group.12to17 = "12-17",
-                                         age_group.18to25 = "18-25",
-                                         age_group.26to49 = "26-49",
-                                         age_group.50to69 = "50-69",
-                                         age_group.70to79 = "70-79",
-                                         age_group.80plus = "80+",
-                                         race.white = "White",
-                                         race.american_indian = "American Indian",
-                                         race.asian = "Asian",
-                                         race.black = "Black",
-                                         race.hawaiian_pacific_islander = "Hawaiian/Pacific Islander",
-                                         race.hispanic_latino = "Hispanic/Latino",
-                                         race.other = "Other",
-                                         readmitted.false = "Not Readmitted",
-                                         readmitted.true = "Readmitted",
-                                         survival.alive = "Alive",
-                                         survival.deceased = "Deceased")
-
+         Demo_var = factor(Demo_var, levels = ordered_vars)) %>% 
+  group_by(Demo_var) %>% 
+  mutate(across(starts_with('n_var'),
+                function(x)
+                    paste0(x, ' (', round(x / sum(x, na.rm = TRUE) * 100, 1), '%', ')')
+                )) %>%
+  ungroup() %>% 
+  arrange(Demo_var) %>% 
+  select(Demo_var_i, N, starts_with('n_var')) %>%
+  `colnames<-`(gsub(
+    x = names(.),
+    pattern = "n_var_",
+    replacement = ""
+  )) %>% 
+  rename('Table 1' = Demo_var_i)
 
 kbl(tableOne_compiled) %>%
-  add_header_above(c(" ", "", "No Neurological Disease" = 1, "Neurological Disease" = 3)) %>%
+  add_header_above(c(
+    " ",
+    "",
+    "No Neurological Disease" = 1,
+    "Neurological Disease" = 3
+  )) %>%
   kable_paper("striped", full_width = F) %>%
+  pack_rows("Gender", 2, 3) %>%
   pack_rows("Age", 4, 12) %>%
-  pack_rows("Race & Ethnicty", 13, 19) %>%
-  pack_rows("Readmission", 20, 21) %>%
-  pack_rows("Deceased", 22, 23)
+  pack_rows("Race & Ethnicity", 13, 19) %>%
+  pack_rows("Readmission status", 20, 21) %>%
+  pack_rows("Severity status", 22, 23) %>% 
+  pack_rows("Survival status", 24, 25)
 
 ```
 
 ```{r fig.height=15, fig.width=11}
-combined_table <- combined_table %>%
-    mutate(Demo_var = sub("\\..*", "", variable),
-           Demo_var_i = sub(".*\\.", "", variable)) %>%
-  pivot_longer(cols = c(n_var_None:n_var_Both),
-               names_to = "Dx",
-               values_to = "Count") %>% 
-  replace_na(list(Count = 0))
-
-combined_table$Dx <- recode(combined_table$Dx,
-                            n_var_Both = "Both",
-                            n_var_Central = "CNS",
-                            n_var_Peripheral = "PNS",
-                            n_var_None = "None")
-
-combined_table$Dx <- fct_relevel(combined_table$Dx, 
-                                         c('None', 'CNS', 'PNS', "Both"))
+combined_table <- combined_table_wide %>%
+  pivot_longer(
+    cols = c(n_var_None:n_var_Both),
+    names_to = "Dx",
+    values_to = "Count"
+  ) %>%
+  replace_na(list(Count = 0)) %>% 
+  mutate(Dx = gsub('n_var_', '', Dx) %>% 
+           fct_relevel(c('None', 'Central', 'Peripheral', "Both")))
 ```
 
-```{r}
-combined_table$Demo_var_i <-  recode(combined_table$Demo_var_i,
-                                     female = "Female",
-                                     male = "Male",
-                                     `00to02`  = "0-2",
-                                     `03to05` = "3-5",
-                                     `06to11` = "6-11",
-                                     `12to17` = "12-17",
-                                     `18to25` = "18-25",
-                                     `26to49` = "26-49",
-                                     `50to69` = "50-69",
-                                     `70to79` = "70-79",
-                                     `80plus` = "80+",
-                                     white = "White",
-                                     american_indian = "American Indian",
-                                     asian = "Asian",
-                                     black = "Black",
-                                     hawaiian_pacific_islander = "Hawaiian/Pacific Islander",
-                                     hispanic_latino = "Hispanic/Latino",
-                                     other = "Other",
-                                     false = "Not Readmitted",
-                                     true = "Readmitted",
-                                     alive = "Alive",
-                                     deceased = "Deceased",
-                                     `non-severe` = "Non-Severe",
-                                     severe = 'Severe')
-```
 
 ## Figures
 
@@ -297,11 +160,7 @@ age_dx <- combined_table %>%
 
 ```
 
-
 ```{r gender-plot} 
-sorted_sites <- rev(c("APHP", "FRBDX", "ICSM", "NWU", "UPENN", "UPITT"))
-colorBlindGrey6 <- c("#0072B2", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#CC79A7")
-
 showtext::showtext_auto()
 female <- intToUtf8(9792)
 male <- intToUtf8(9794)
@@ -323,7 +182,7 @@ gender_plot <- gender_count %>%
   geom_text(data = . %>% filter(Demo_var_i == 'Male'),
             aes(y = site, x = total_count - 22*sqrt(abs(total_count)),
                 label = abs(total_count)), color = 'grey10', size = 3) +
-    geom_text(data = . %>% filter(Demo_var_i == 'Female'),
+  geom_text(data = . %>% filter(Demo_var_i == 'Female'),
             aes(y = site, x = total_count + 19*sqrt(abs(total_count)),
                 label = abs(total_count)), color = 'grey10', size = 3) +
   geom_text(data = . %>% filter(site == 'APHP', Demo_var_i == 'Female'),
@@ -437,6 +296,9 @@ cowplot::plot_grid(gender_plot, age_plot, race_plot, ncol = 1,
                    rel_heights = c(1, 1.1, 0.75))
 ```
 
+
+## Other exploratory analyses
+
 ```{r echo=T, message=FALSE, warning=FALSE, results='hide'}
 neuro_types <- c('None', 'Central', 'Peripheral', 'Both')
 
@@ -513,9 +375,11 @@ combined_table %>%
   mutate(name = gsub('prop_', '', name) %>% fct_relevel(neuro_types)) %>% 
   ggplot(aes(x = name, y = value, group = site, color = site)) +
     geom_point() +
+  rcartocolor::scale_color_carto_d() +
   geom_line() +
   scale_y_continuous(limits = c(0,1)) +
-  labs(x = NULL, y = 'Proportion survived') +
+  labs(x = NULL, y = 'Proportion survived', color = NULL) +
+  theme(legend.position = 'top') +
   NULL
 
 combined_table %>% 
