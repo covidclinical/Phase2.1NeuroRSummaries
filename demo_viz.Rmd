@@ -12,21 +12,22 @@ library(gridExtra)
 library(ggpubr)
 library(DT)
 library(kableExtra)
-# library(ggplot2)
-# library(viridis)
-# library(forcats)
 library(cowplot)
 theme_set(theme_bw() +
             theme(panel.grid.minor = element_blank()))
 ```
 
 ```{r}
-load('results/NWU_results.rda')
-load('results/UPENN_results.rda')
-load('results/UPitt_results.rda')
-load('results/APHP_results.rda')
-load('results/FRBDX_results.rda')
-load('results/ICSM_results.rda')
+rdas <- list.files(path = 'results',
+                   pattern = '.rda',
+                   full.names = TRUE)
+for (rda in rdas)
+  load(rda)
+
+rm(rdas, rda)
+results <- ls()
+
+sites_wo_race <- c('APHP', 'FRBDX', 'ICSM', 'HPG23')
 ```
 
 ## Demographic Data
@@ -35,8 +36,7 @@ load('results/ICSM_results.rda')
 
 ```{r}
 demo_table_list <- list()
-results <- c("NWU_results", "UPENN_results", "UPitt_results", "APHP_results", "FRBDX_results", "ICSM_results")
-sites_wo_race <- c('APHP', 'FRBDX', 'ICSM')
+
 for (i in results) { 
   tmp <- get(i)
   demo_table <- tmp[["first_hosp_results"]][["cpns_results"]][["demo_table"]]
@@ -51,8 +51,7 @@ combined_table <- do.call(bind_rows, demo_table_list) %>%
 combined_table <- combined_table %>%
   mutate(variable = tolower(variable)) 
 
-# heatmap(UPENN_results$elix_mat) 
-
+# heatmap(UPITT_results$elix_mat)
 ```
 
 ## Table One
