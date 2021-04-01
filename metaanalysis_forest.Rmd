@@ -24,11 +24,13 @@ load('results/UPITT_results.rda')
 load('results/APHP_results.rda')
 load('results/FRBDX_results.rda')
 load('results/ICSM_results.rda')
+load('results/MGB_results.rda')
+load('results/HPG23_results.rda')
 ```
 
 ## Conduct Random-Effects Meta-Analysis
 
-Here we conduct meta-analysis on outcomes occuring within the first hospital stay.
+Here we conduct meta-analysis on outcomes occurring within the first hospital stay.
 
 ```{r}
 get_site <- function(x){
@@ -67,7 +69,8 @@ meta_results <- list()
 for (outcome_i in outcomes) {
   meta_results[[outcome_i]] <-
     list(NWU_results, UPENN_results, UPITT_results, 
-         APHP_results, ICSM_results, FRBDX_results) %>% # add other results here
+         APHP_results, ICSM_results, FRBDX_results, 
+         MGB_results, HPG23_results) %>% # add other results here
     lapply(get_result_row, outcome = outcome_i) %>%
     bind_rows() %>%
     metagen(
@@ -98,6 +101,10 @@ for (i in names(meta_results)) {
   Weight = meta_results[[i]][["w.random"]]
   upper = meta_results[[i]][["upper"]]
   lower = meta_results[[i]][["lower"]]
+  #TE.random = meta_results[[i]][["TE.random"]]
+  #lower.random = meta_results[[i]][["lower.random"]]
+  #upper.random = meta_results[[i]][["upper.random"]]
+  #pval.random = meta_results[[i]][["pval.random"]]
   analysis = paste(i)
   df <- cbind(studlab, TE, seTE, Weight, upper, lower, analysis)
   ma_combine[[i]] <- df
@@ -178,29 +185,35 @@ combined_results$Analysis <- ifelse(is.na(combined_results$Estimate),
                          paste0("   ", combined_results$Analysis))
 ```
 
+Manually change row names to make it easier to subset
+
 ```{r}
-# remove ICSM for severity (wicked high estimates!)
-# remove ICCM, APHP for readmission
-binary_results <- combined_results[c(27:30, 33, 8:12,14:19),]
+rownames_change <- combined_results %>% filter(is.na(Estimate)) %>% row.names()
 
-#combined_results <- tibble::rownames_to_column(combined_results, "model")
-
-#binary_results <- combined_results %>% 
-#  filter(str_detect(model, '\\b(Severe|Mortality|Readmission)\\b'),
-#         !str_detect(model, '\\b(Time)\\b'))
+rownames(combined_results)[rownames(combined_results) == "...1"] <- "Length of Stay"
+rownames(combined_results)[rownames(combined_results) == "Length of Stay.7"] <- "Severe"
+rownames(combined_results)[rownames(combined_results) == "Severe COVID-19.91"] <- "Mortality"
+rownames(combined_results)[rownames(combined_results) == "Mortality.8"] <- "Number of Readmissions"
+rownames(combined_results)[rownames(combined_results) == "Number of Readmissions.9"] <- "Readmission"
+rownames(combined_results)[rownames(combined_results) == "Readmission.9"] <- "Time to Severity"
+rownames(combined_results)[rownames(combined_results) == "Time to Severity.8"] <- "Time to Mortality"
+rownames(combined_results)[rownames(combined_results) == "Time to Mortality.8"] <- "Time to of Readmission"
 ```
+
+
 
 ## Readmission, Severity, & Mortality
 
-**Notes:**
-
-* remove ICSM for severity - high standard error
-* ICCM, APHP for readmission - high estimates (~19, ~22)
-
 ```{r message=FALSE, warning=FALSE}
-devtools::install_github("rdboyes/forester")
+#devtools::install_github("rdboyes/forester")
 library(forester)
 
+toMatch <- c("Severe", "Mortality", "Readmission")
+
+binary_results <- combined_results %>% 
+  slice(grep(paste(toMatch, collapse="|"), row.names(.))) %>% 
+  filter(!grepl('Number|Time', row.names(.)))
+ 
 binary_results[is.na(binary_results)] <- ""
 
 binary_results$Estimate <- as.numeric(as.character(binary_results$Estimate))
@@ -226,7 +239,11 @@ forester(left_side_data = binary_results[1],
 ## Time to Events
 
 ```{r message=FALSE, warning=FALSE}
-time_results <- combined_results[c(34:44),]
+toMatch <- c("Time")
+
+time_results <- combined_results %>% 
+  slice(grep(paste(toMatch, collapse="|"), row.names(.))) %>% 
+  filter(!grepl('Readmission', row.names(.)))
 
 time_results[is.na(time_results)] <- ""
 
@@ -251,7 +268,11 @@ forester(left_side_data = time_results[1],
 ```
 
 ```{r message=FALSE, warning=FALSE}
-time_results2 <- combined_results[c(45:51),]
+toMatch <- c("Time")
+
+time_results2 <- combined_results %>% 
+  slice(grep(paste(toMatch, collapse="|"), row.names(.))) %>% 
+  filter(!grepl('Mortality|Severity', row.names(.)))
 
 time_results2[is.na(time_results2)] <- ""
 
@@ -277,12 +298,11 @@ forester(left_side_data = time_results2[1],
 
 ## Length Stay
 
-**Notes:**
-
-* removed ICSM, APHP (high estimates - 17.8, 19.8)
-
 ```{r message=FALSE, warning=FALSE}
-day_results <- combined_results[c(1:4,7),]
+toMatch <- c("Length")
+
+day_results <- combined_results %>% 
+  slice(grep(paste(toMatch, collapse="|"), row.names(.)))
 
 day_results[is.na(day_results)] <- ""
 
@@ -309,7 +329,10 @@ forester(left_side_data = day_results[1],
 ## Days to Readmission
 
 ```{r message=FALSE, warning=FALSE}
-nday_results <- combined_results[20:27,]
+toMatch <- c("Number of Readmissions")
+
+nday_results <- combined_results %>% 
+  slice(grep(paste(toMatch, collapse="|"), row.names(.)))
 
 nday_results[is.na(nday_results)] <- ""
 
