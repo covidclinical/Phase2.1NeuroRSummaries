@@ -7,12 +7,15 @@ output: html_document
 
 ```{r message=FALSE, warning=FALSE}
 library(tidyverse)
+library(dplyr)
 library(gridGraphics)
 library(gridExtra)
 library(ggpubr)
 library(DT)
 library(kableExtra)
 library(cowplot)
+library(tidytable)
+library(RColorBrewer)
 theme_set(theme_bw() +
             theme(panel.grid.minor = element_blank()))
 ```
@@ -78,6 +81,243 @@ combined_table_wide <- bind_rows(demo_table_list) %>%
 # heatmap(UPITT_results$elix_mat)
 ```
 
+```{r}
+other_table_list <- list()
+for (i in results) { 
+  tmp <- get(i)
+  other_table_list[[i]] <- tmp[[c("first_hosp_results",
+                                 "cpns_results",
+                                 "other_obfus_table")]] %>% 
+    select(site, everything())
+}
+
+combined_other_table_wide <- bind_rows(other_table_list) %>% 
+  filter(grepl('Mean|Median', name))
+
+vars_to_process <-  unique(combined_other_table_wide$name)
+  
+
+processed_list <- list()
+for (i in vars_to_process) {
+  
+  mod_table <- combined_other_table_wide %>% 
+    rename('var' = name) %>%
+    filter(var == i) %>% 
+  mutate(
+    site = toupper(site),
+    None = sub("(\\(.*|\\[.*)", "", None),
+    Peripheral = sub("(\\(.*|\\[.*)", "", Peripheral),
+    Central = sub("(\\(.*|\\[.*)", "", Central),
+    Both = sub("(\\(.*|\\[.*)", "", Both)) %>% 
+  mutate_across.(c(None:Both), as.numeric) %>% 
+    as_tibble %>% 
+    select(-site, -var) %>%
+    summarise_all(list(mean = mean, 
+                       median = median, 
+                       min = min, 
+                       max = max), 
+                  na.rm = TRUE)
+  
+  processed_list[[i]] <- mod_table
+}
+
+other_table_compiled <- bind_rows(processed_list, .id = "Table 1") %>%
+  select(-contains("mean")) %>%
+  filter(grepl('Median', `Table 1`)) %>%
+  mutate(None = paste(None_median, "[", None_min, ",", None_max, "]"),
+         Peripheral = paste(Peripheral_median, "[", Peripheral_min, ",", Peripheral_max, "]"),
+         Central = paste(Central_median, "[", Central_min, ",", Central_max, "]"),
+         Both = paste(Both_median, "[", Both_min, ",", Both_max, "]")) %>%
+  mutate(N = NA) %>%
+  select(`Table 1`, N, None, Peripheral, Central, Both)
+```
+
+```{r}
+processed_list_figs <- list()
+for (i in vars_to_process) {
+  
+  mod_table <- combined_other_table_wide %>% 
+    rename('var' = name) %>%
+    filter(var == i) %>% 
+  mutate(
+    site = toupper(site),
+    None = sub("(\\(.*|\\[.*)", "", None),
+    Peripheral = sub("(\\(.*|\\[.*)", "", Peripheral),
+    Central = sub("(\\(.*|\\[.*)", "", Central),
+    Both = sub("(\\(.*|\\[.*)", "", Both)) %>% 
+  mutate_across.(c(None:Both), as.numeric)
+
+  processed_list_figs[[i]] <- mod_table
+  
+}
+
+other_table_for_figs <- bind_rows(processed_list_figs)
+```
+
+**Site Level Results**
+
+```{r echo=FALSE,message=FALSE, warning=FALSE}
+p1 <- ggplot(other_table_for_figs %>%
+         pivot_longer(cols = None:Both,
+                      names_to = "type") %>%
+         filter(var == "Mean Elixhauser score (SD)") %>%
+         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
+       aes(y = value, x = type, fill = site)) + 
+  geom_bar(stat="identity", position = "dodge", colour="black") + 
+   scale_fill_brewer(palette = "Dark2") + 
+  ggtitle("Mean Elixhauser score (SD)")
+
+p2 <- ggplot(other_table_for_figs %>%
+         pivot_longer(cols = None:Both,
+                      names_to = "type") %>%
+         filter(var == "Median Elixhauser score [Min, Max]") %>%
+         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
+       aes(y = value, x = type, fill = site)) + 
+  geom_bar(stat="identity", position = "dodge", colour="black") + 
+   scale_fill_brewer(palette = "Dark2") + 
+  ggtitle("Median Elixhauser score [Min, Max]")
+
+plot_grid(p1, p2)
+
+p3 <- ggplot(other_table_for_figs %>%
+         pivot_longer(cols = None:Both,
+                      names_to = "type") %>%
+         filter(var == "Mean length of stay (SD)") %>%
+         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
+       aes(y = value, x = type, fill = site)) + 
+  geom_bar(stat="identity", position = "dodge", colour="black") + 
+   scale_fill_brewer(palette = "Dark2") + 
+  ggtitle("Mean length of stay (SD)")
+
+p4 <- ggplot(other_table_for_figs %>%
+         pivot_longer(cols = None:Both,
+                      names_to = "type") %>%
+         filter(var == "Median length of stay [Min, Max]") %>%
+         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
+       aes(y = value, x = type, fill = site)) + 
+  geom_bar(stat="identity", position = "dodge", colour="black") + 
+   scale_fill_brewer(palette = "Dark2") + 
+  ggtitle("Median length of stay [Min, Max]")
+
+plot_grid(p3, p4)
+
+
+p5 <- ggplot(other_table_for_figs %>%
+         pivot_longer(cols = None:Both,
+                      names_to = "type") %>%
+         filter(var == "Mean number of readmissions (SD)") %>%
+         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
+       aes(y = value, x = type, fill = site)) + 
+  geom_bar(stat="identity", position = "dodge", colour="black") + 
+   scale_fill_brewer(palette = "Dark2") + 
+  ggtitle("Mean number of readmissions (SD)")
+
+p6 <- ggplot(other_table_for_figs %>%
+         pivot_longer(cols = None:Both,
+                      names_to = "type") %>%
+         filter(var == "Median number of readmissions [Min, Max]") %>%
+         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
+       aes(y = value, x = type, fill = site)) + 
+  geom_bar(stat="identity", position = "dodge", colour="black") + 
+   scale_fill_brewer(palette = "Dark2") + 
+  ggtitle("Median number of readmissions [Min, Max]")
+
+plot_grid(p5, p6)
+
+
+p7 <- ggplot(other_table_for_figs %>%
+         pivot_longer(cols = None:Both,
+                      names_to = "type") %>%
+         filter(var == "Mean time to death (SD)") %>%
+         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
+       aes(y = value, x = type, fill = site)) + 
+  geom_bar(stat="identity", position = "dodge", colour="black") + 
+   scale_fill_brewer(palette = "Dark2") + 
+  ggtitle("Mean time to death (SD) ")
+
+
+
+p8 <- ggplot(other_table_for_figs %>%
+         pivot_longer(cols = None:Both,
+                      names_to = "type") %>%
+         filter(var == "Median time to death [Min, Max]") %>%
+         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
+       aes(y = value, x = type, fill = site)) + 
+  geom_bar(stat="identity", position = "dodge", colour="black") + 
+   scale_fill_brewer(palette = "Dark2") + 
+  ggtitle("Median time to death [Min, Max]")
+
+plot_grid(p7, p8)
+
+p9 <- ggplot(other_table_for_figs %>%
+         pivot_longer(cols = None:Both,
+                      names_to = "type") %>%
+         filter(var == "Mean time to first readmission (SD)") %>%
+         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
+       aes(y = value, x = type, fill = site)) + 
+  geom_bar(stat="identity", position = "dodge", colour="black") + 
+   scale_fill_brewer(palette = "Dark2") + 
+  ggtitle("Mean time to first readmission (SD)")
+
+p10 <- ggplot(other_table_for_figs %>%
+         pivot_longer(cols = None:Both,
+                      names_to = "type") %>%
+         filter(var == "Median time to first readmission [Min, Max]") %>%
+         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
+       aes(y = value, x = type, fill = site)) + 
+  geom_bar(stat="identity", position = "dodge", colour="black") + 
+   scale_fill_brewer(palette = "Dark2") + 
+  ggtitle("Median time to first readmission [Min, Max]")
+
+plot_grid(p9, p10)
+
+
+p11 <- ggplot(other_table_for_figs %>%
+         pivot_longer(cols = None:Both,
+                      names_to = "type") %>%
+         filter(var == "Mean time to first readmission (SD)") %>%
+         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
+       aes(y = value, x = type, fill = site)) + 
+  geom_bar(stat="identity", position = "dodge", colour="black") + 
+   scale_fill_brewer(palette = "Dark2") + 
+  ggtitle("Mean time to first readmission (SD)")
+
+p12 <- ggplot(other_table_for_figs %>%
+         pivot_longer(cols = None:Both,
+                      names_to = "type") %>%
+         filter(var == "Median time to first readmission [Min, Max]") %>%
+         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
+       aes(y = value, x = type, fill = site)) + 
+  geom_bar(stat="identity", position = "dodge", colour="black") + 
+   scale_fill_brewer(palette = "Dark2") + 
+  ggtitle("Median time to first readmission [Min, Max]")
+
+plot_grid(p11, p12)
+
+
+p13 <- ggplot(other_table_for_figs %>%
+         pivot_longer(cols = None:Both,
+                      names_to = "type") %>%
+         filter(var == "Mean time to severe (SD)") %>%
+         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
+       aes(y = value, x = type, fill = site)) + 
+  geom_bar(stat="identity", position = "dodge", colour="black") + 
+   scale_fill_brewer(palette = "Dark2") + 
+  ggtitle("Mean time to severe (SD)")
+
+p14 <- ggplot(other_table_for_figs %>%
+         pivot_longer(cols = None:Both,
+                      names_to = "type") %>%
+         filter(var == "Median time to severe [Min, Max]") %>%
+         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
+       aes(y = value, x = type, fill = site)) + 
+  geom_bar(stat="identity", position = "dodge", colour="black") + 
+   scale_fill_brewer(palette = "Dark2") + 
+  ggtitle(" Median time to severe [Min, Max]")
+
+plot_grid(p13, p14)
+```
+
 
 ## Table One
 
@@ -88,6 +328,21 @@ tableOne_inter <- combined_table_wide %>%
   group_by(variable, Demo_var, Demo_var_i) %>% 
   summarise(across(starts_with('n_var'), 
                    function(x) sum(x, na.rm = TRUE)))
+
+row_order <- c("All Patients", "Female", "Male",
+                                       "0-2", "3-5", "6-11", "12-17", "18-25", 
+                                       "26-49", "50-69", "70-79", "80+", 
+                                       "American Indian", "Asian", "Black", 
+                                       "Hawaiian/Pacific Islander", 
+                                       "Hispanic/Latino", "Other", "White", 
+                                       "Median Elixhauser score [Min, Max]",
+                                       "Median length of stay [Min, Max]",
+                                       "Non-Severe", "Severe", 
+                                       "Median time to severe [Min, Max]",
+                                       "Alive", "Deceased", "Median time to death [Min, Max]",
+                                       "Not Readmitted","Readmitted", 
+                                       "Median time to first readmission [Min, Max]",
+                                       "Median number of readmissions [Min, Max]")
 
 tableOne_compiled <- tableOne_inter %>% 
   ungroup() %>% 
@@ -114,7 +369,37 @@ tableOne_compiled <- tableOne_inter %>%
     pattern = "n_var_",
     replacement = ""
   )) %>% 
-  rename('Table 1' = Demo_var_i)
+  rename('Table 1' = Demo_var_i) %>%
+  bind_rows(other_table_compiled) %>%
+  slice(match(row_order, `Table 1`)) 
+
+
+tableOne_compiled <- tableOne_compiled %>%
+  mutate(N = if_else(`Table 1` == "Median length of stay [Min, Max]", 
+                     tableOne_compiled %>% 
+                       filter(`Table 1` == "All Patients") %>% 
+                       select(N) %>%
+                       as.numeric(), N),
+         N = if_else(`Table 1` == "Median time to severe [Min, Max]",
+                     tableOne_compiled %>% 
+                       filter(`Table 1` == "Severe") %>% 
+                       select(N) %>%
+                       as.numeric(), N),
+         N = if_else(`Table 1` == "Median time to death [Min, Max]",
+                     tableOne_compiled %>% 
+                       filter(`Table 1` == "Deceased") %>% 
+                       select(N) %>%
+                       as.numeric(), N),
+         N = if_else(`Table 1` == "Median time to first readmission [Min, Max]",
+                     tableOne_compiled %>% 
+                       filter(`Table 1` == "Readmitted") %>% 
+                       select(N) %>%
+                       as.numeric(), N),
+         N = if_else(`Table 1` == "Median number of readmissions [Min, Max]",
+                     tableOne_compiled %>% 
+                       filter(`Table 1` == "Readmitted") %>% 
+                       select(N) %>%
+                       as.numeric(), N))
 
 kbl(tableOne_compiled) %>%
   add_header_above(c(
@@ -127,9 +412,11 @@ kbl(tableOne_compiled) %>%
   pack_rows("Gender", 2, 3) %>%
   pack_rows("Age", 4, 12) %>%
   pack_rows("Race & Ethnicity", 13, 19) %>%
-  pack_rows("Readmission status", 20, 21) %>%
-  pack_rows("Severity status", 22, 23) %>% 
-  pack_rows("Survival status", 24, 25)
+  pack_rows("Comorbidites", 20, 20) %>%
+  pack_rows("Hospital Course", 21, 21) %>%
+  pack_rows("Severity", 22, 24) %>% 
+  pack_rows("Survival", 25, 27) %>%
+  pack_rows("Readmission", 28, 31)
 
 ```
 
