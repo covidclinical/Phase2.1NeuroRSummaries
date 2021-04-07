@@ -346,7 +346,7 @@ forester(left_side_data = time_results2[1],
          arrow_labels = c("Decreased Time", "Increased Time"),
          xlim = c(-45,45),
          xbreaks = c(-45, 0, 45),
-         file_path = here::here("time_to_events.png"))
+         file_path = here::here("time_to_events2.png"))
 ```
 
 ## Length Stay
@@ -371,7 +371,7 @@ forester(left_side_data = day_results[1],
          file_path =here::here("length_of_stay.png"))
 ```
 
-## Days to Readmission
+## Days to Readmissions
 
 ```{r message=FALSE, warning=FALSE}
 toMatch <- c("Number of Readmissions")
