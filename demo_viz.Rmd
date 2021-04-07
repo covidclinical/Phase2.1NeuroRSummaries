@@ -14,27 +14,43 @@ library(ggpubr)
 library(DT)
 library(kableExtra)
 library(cowplot)
-library(tidytable)
 library(RColorBrewer)
+library(glue)
 theme_set(theme_bw() +
-            theme(panel.grid.minor = element_blank()))
+  theme(panel.grid.minor = element_blank()))
 ```
 
 ```{r}
-rdas <- list.files(path = 'results',
-                   pattern = '.rda',
-                   full.names = TRUE)
-for (rda in rdas)
+rdas <- list.files(
+  path = "results",
+  pattern = ".rda",
+  full.names = TRUE
+)
+for (rda in rdas) {
   load(rda)
+}
 
 rm(rdas, rda)
-sorted_sites <- rev(c("APHP", "FRBDX", "HPG23", "ICSM",  
-                      "MGB", "NWU", "UPENN", "UPITT"))
-sites_wo_race <- c('APHP', 'FRBDX', 'ICSM', 'HPG23')
-# colorBlindGrey6 <- 
+site_google_url <- "https://docs.google.com/spreadsheets/d/1epcYNd_0jCUMktOHf8mz5v651zy1JALD6PgzobrGWDY/edit?usp=sharing"
+
+site_params <- googlesheets4::read_sheet(site_google_url, sheet = 1)
+site_avails <- googlesheets4::read_sheet(site_google_url, sheet = 2)
+# sorted_sites <- site_avails %>%
+#   filter(`data received` == 'Y') %>%
+#   pull(siteid)
+
+sorted_sites <- rev(c(
+  "APHP", "FRBDX", "HPG23", "ICSM", "MGB", "NWU", "UPENN", "UPITT"
+))
+
+sites_wo_race <- site_params %>%
+  filter(include_race == FALSE) %>%
+  pull(siteid)
+
+# colorBlindGrey6 <-
 #   c("#0072B2", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#CC79A7")
 
-results <- paste(sorted_sites, 'results', sep = '_')
+results <- paste(sorted_sites, "results", sep = "_")
 ```
 
 ## Demographic Data
@@ -44,11 +60,13 @@ results <- paste(sorted_sites, 'results', sep = '_')
 ```{r}
 demo_table_list <- list()
 
-for (i in results) { 
+for (i in results) {
   tmp <- get(i)
-  demo_table_list[[i]] <- tmp[[c("first_hosp_results",
-                                 "cpns_results",
-                                 "demo_table")]] %>% 
+  demo_table_list[[i]] <- tmp[[c(
+    "first_hosp_results",
+    "cpns_results",
+    "demo_table"
+  )]] %>%
     select(site, everything())
 }
 combined_table_wide <- bind_rows(demo_table_list) %>%
@@ -57,11 +75,11 @@ combined_table_wide <- bind_rows(demo_table_list) %>%
     site = toupper(site),
     variable = tolower(variable),
     Demo_var = sub("\\..*", "", variable),
-    Demo_var_i = sub(".*\\.", "", variable) %>% 
-      gsub('_', ' ', .) %>% 
-      str_to_title() %>% 
+    Demo_var_i = sub(".*\\.", "", variable) %>%
+      gsub("_", " ", .) %>%
+      str_to_title() %>%
       recode(
-        `00to02`  = "0-2",
+        `00to02` = "0-2",
         `03to05` = "3-5",
         `06to11` = "6-11",
         `12to17` = "12-17",
@@ -75,7 +93,8 @@ combined_table_wide <- bind_rows(demo_table_list) %>%
         `Hawaiian Pacific Islander` = "Hawaiian/Pacific Islander",
         `Hispanic Latino` = "Hispanic/Latino",
         `False` = "Not Readmitted",
-        `True` = "Readmitted")
+        `True` = "Readmitted"
+      )
   )
 
 # heatmap(UPITT_results$elix_mat)
@@ -83,72 +102,78 @@ combined_table_wide <- bind_rows(demo_table_list) %>%
 
 ```{r}
 other_table_list <- list()
-for (i in results) { 
+for (i in results) {
   tmp <- get(i)
-  other_table_list[[i]] <- tmp[[c("first_hosp_results",
-                                 "cpns_results",
-                                 "other_obfus_table")]] %>% 
+  other_table_list[[i]] <- tmp[[c(
+    "first_hosp_results",
+    "cpns_results",
+    "other_obfus_table"
+  )]] %>%
     select(site, everything())
 }
 
-combined_other_table_wide <- bind_rows(other_table_list) %>% 
-  filter(grepl('Mean|Median', name))
+combined_other_table_wide <- bind_rows(other_table_list) %>%
+  filter(grepl("Mean|Median", name))
 
-vars_to_process <-  unique(combined_other_table_wide$name)
-  
+vars_to_process <- unique(combined_other_table_wide$name)
+
 
 processed_list <- list()
 for (i in vars_to_process) {
-  
-  mod_table <- combined_other_table_wide %>% 
-    rename('var' = name) %>%
-    filter(var == i) %>% 
-  mutate(
-    site = toupper(site),
-    None = sub("(\\(.*|\\[.*)", "", None),
-    Peripheral = sub("(\\(.*|\\[.*)", "", Peripheral),
-    Central = sub("(\\(.*|\\[.*)", "", Central),
-    Both = sub("(\\(.*|\\[.*)", "", Both)) %>% 
-  mutate_across.(c(None:Both), as.numeric) %>% 
-    as_tibble %>% 
+  mod_table <- combined_other_table_wide %>%
+    rename("var" = name) %>%
+    filter(var == i) %>%
+    mutate(
+      site = toupper(site),
+      None = sub("(\\(.*|\\[.*)", "", None),
+      Peripheral = sub("(\\(.*|\\[.*)", "", Peripheral),
+      Central = sub("(\\(.*|\\[.*)", "", Central),
+      Both = sub("(\\(.*|\\[.*)", "", Both)
+    ) %>%
+    mutate(across(None:Both, as.numeric)) %>%
+    as_tibble() %>%
     select(-site, -var) %>%
-    summarise_all(list(mean = mean, 
-                       median = median, 
-                       min = min, 
-                       max = max), 
-                  na.rm = TRUE)
-  
+    summarise_all(list(
+      mean = mean,
+      median = median,
+      min = min,
+      max = max
+    ),
+    na.rm = TRUE
+    )
+
   processed_list[[i]] <- mod_table
 }
 
 other_table_compiled <- bind_rows(processed_list, .id = "Table 1") %>%
   select(-contains("mean")) %>%
-  filter(grepl('Median', `Table 1`)) %>%
-  mutate(None = paste(None_median, "[", None_min, ",", None_max, "]"),
-         Peripheral = paste(Peripheral_median, "[", Peripheral_min, ",", Peripheral_max, "]"),
-         Central = paste(Central_median, "[", Central_min, ",", Central_max, "]"),
-         Both = paste(Both_median, "[", Both_min, ",", Both_max, "]")) %>%
-  mutate(N = NA) %>%
+  filter(grepl("Median", `Table 1`)) %>%
+  mutate(
+    None = glue("{None_median} [{None_min}, {None_max}]"),
+    Peripheral = glue("{Peripheral_median} [{Peripheral_min}, {Peripheral_max}]"),
+    Central = glue("{Central_median} [{Central_min}, {Central_max}]"),
+    Both = glue("{Both_median} [{Both_min}, {Both_max}]"),
+    N = NA
+  ) %>%
   select(`Table 1`, N, None, Peripheral, Central, Both)
 ```
 
 ```{r}
 processed_list_figs <- list()
 for (i in vars_to_process) {
-  
-  mod_table <- combined_other_table_wide %>% 
-    rename('var' = name) %>%
-    filter(var == i) %>% 
-  mutate(
-    site = toupper(site),
-    None = sub("(\\(.*|\\[.*)", "", None),
-    Peripheral = sub("(\\(.*|\\[.*)", "", Peripheral),
-    Central = sub("(\\(.*|\\[.*)", "", Central),
-    Both = sub("(\\(.*|\\[.*)", "", Both)) %>% 
-  mutate_across.(c(None:Both), as.numeric)
+  mod_table <- combined_other_table_wide %>%
+    rename("var" = name) %>%
+    filter(var == i) %>%
+    mutate(
+      site = toupper(site),
+      None = sub("(\\(.*|\\[.*)", "", None),
+      Peripheral = sub("(\\(.*|\\[.*)", "", Peripheral),
+      Central = sub("(\\(.*|\\[.*)", "", Central),
+      Both = sub("(\\(.*|\\[.*)", "", Both)
+    ) %>%
+    mutate(across(None:Both, as.numeric))
 
   processed_list_figs[[i]] <- mod_table
-  
 }
 
 other_table_for_figs <- bind_rows(processed_list_figs)
@@ -156,250 +181,122 @@ other_table_for_figs <- bind_rows(processed_list_figs)
 
 **Site Level Results**
 
-```{r echo=FALSE,message=FALSE, warning=FALSE}
-p1 <- ggplot(other_table_for_figs %>%
-         pivot_longer(cols = None:Both,
-                      names_to = "type") %>%
-         filter(var == "Mean Elixhauser score (SD)") %>%
-         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
-       aes(y = value, x = type, fill = site)) + 
-  geom_bar(stat="identity", position = "dodge", colour="black") + 
-   scale_fill_brewer(palette = "Dark2") + 
-  ggtitle("Mean Elixhauser score (SD)")
-
-p2 <- ggplot(other_table_for_figs %>%
-         pivot_longer(cols = None:Both,
-                      names_to = "type") %>%
-         filter(var == "Median Elixhauser score [Min, Max]") %>%
-         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
-       aes(y = value, x = type, fill = site)) + 
-  geom_bar(stat="identity", position = "dodge", colour="black") + 
-   scale_fill_brewer(palette = "Dark2") + 
-  ggtitle("Median Elixhauser score [Min, Max]")
-
-plot_grid(p1, p2)
-
-p3 <- ggplot(other_table_for_figs %>%
-         pivot_longer(cols = None:Both,
-                      names_to = "type") %>%
-         filter(var == "Mean length of stay (SD)") %>%
-         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
-       aes(y = value, x = type, fill = site)) + 
-  geom_bar(stat="identity", position = "dodge", colour="black") + 
-   scale_fill_brewer(palette = "Dark2") + 
-  ggtitle("Mean length of stay (SD)")
-
-p4 <- ggplot(other_table_for_figs %>%
-         pivot_longer(cols = None:Both,
-                      names_to = "type") %>%
-         filter(var == "Median length of stay [Min, Max]") %>%
-         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
-       aes(y = value, x = type, fill = site)) + 
-  geom_bar(stat="identity", position = "dodge", colour="black") + 
-   scale_fill_brewer(palette = "Dark2") + 
-  ggtitle("Median length of stay [Min, Max]")
-
-plot_grid(p3, p4)
-
-
-p5 <- ggplot(other_table_for_figs %>%
-         pivot_longer(cols = None:Both,
-                      names_to = "type") %>%
-         filter(var == "Mean number of readmissions (SD)") %>%
-         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
-       aes(y = value, x = type, fill = site)) + 
-  geom_bar(stat="identity", position = "dodge", colour="black") + 
-   scale_fill_brewer(palette = "Dark2") + 
-  ggtitle("Mean number of readmissions (SD)")
-
-p6 <- ggplot(other_table_for_figs %>%
-         pivot_longer(cols = None:Both,
-                      names_to = "type") %>%
-         filter(var == "Median number of readmissions [Min, Max]") %>%
-         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
-       aes(y = value, x = type, fill = site)) + 
-  geom_bar(stat="identity", position = "dodge", colour="black") + 
-   scale_fill_brewer(palette = "Dark2") + 
-  ggtitle("Median number of readmissions [Min, Max]")
-
-plot_grid(p5, p6)
-
-
-p7 <- ggplot(other_table_for_figs %>%
-         pivot_longer(cols = None:Both,
-                      names_to = "type") %>%
-         filter(var == "Mean time to death (SD)") %>%
-         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
-       aes(y = value, x = type, fill = site)) + 
-  geom_bar(stat="identity", position = "dodge", colour="black") + 
-   scale_fill_brewer(palette = "Dark2") + 
-  ggtitle("Mean time to death (SD) ")
-
-
-
-p8 <- ggplot(other_table_for_figs %>%
-         pivot_longer(cols = None:Both,
-                      names_to = "type") %>%
-         filter(var == "Median time to death [Min, Max]") %>%
-         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
-       aes(y = value, x = type, fill = site)) + 
-  geom_bar(stat="identity", position = "dodge", colour="black") + 
-   scale_fill_brewer(palette = "Dark2") + 
-  ggtitle("Median time to death [Min, Max]")
-
-plot_grid(p7, p8)
-
-p9 <- ggplot(other_table_for_figs %>%
-         pivot_longer(cols = None:Both,
-                      names_to = "type") %>%
-         filter(var == "Mean time to first readmission (SD)") %>%
-         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
-       aes(y = value, x = type, fill = site)) + 
-  geom_bar(stat="identity", position = "dodge", colour="black") + 
-   scale_fill_brewer(palette = "Dark2") + 
-  ggtitle("Mean time to first readmission (SD)")
-
-p10 <- ggplot(other_table_for_figs %>%
-         pivot_longer(cols = None:Both,
-                      names_to = "type") %>%
-         filter(var == "Median time to first readmission [Min, Max]") %>%
-         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
-       aes(y = value, x = type, fill = site)) + 
-  geom_bar(stat="identity", position = "dodge", colour="black") + 
-   scale_fill_brewer(palette = "Dark2") + 
-  ggtitle("Median time to first readmission [Min, Max]")
-
-plot_grid(p9, p10)
-
-
-p11 <- ggplot(other_table_for_figs %>%
-         pivot_longer(cols = None:Both,
-                      names_to = "type") %>%
-         filter(var == "Mean time to first readmission (SD)") %>%
-         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
-       aes(y = value, x = type, fill = site)) + 
-  geom_bar(stat="identity", position = "dodge", colour="black") + 
-   scale_fill_brewer(palette = "Dark2") + 
-  ggtitle("Mean time to first readmission (SD)")
-
-p12 <- ggplot(other_table_for_figs %>%
-         pivot_longer(cols = None:Both,
-                      names_to = "type") %>%
-         filter(var == "Median time to first readmission [Min, Max]") %>%
-         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
-       aes(y = value, x = type, fill = site)) + 
-  geom_bar(stat="identity", position = "dodge", colour="black") + 
-   scale_fill_brewer(palette = "Dark2") + 
-  ggtitle("Median time to first readmission [Min, Max]")
-
-plot_grid(p11, p12)
-
-
-p13 <- ggplot(other_table_for_figs %>%
-         pivot_longer(cols = None:Both,
-                      names_to = "type") %>%
-         filter(var == "Mean time to severe (SD)") %>%
-         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
-       aes(y = value, x = type, fill = site)) + 
-  geom_bar(stat="identity", position = "dodge", colour="black") + 
-   scale_fill_brewer(palette = "Dark2") + 
-  ggtitle("Mean time to severe (SD)")
-
-p14 <- ggplot(other_table_for_figs %>%
-         pivot_longer(cols = None:Both,
-                      names_to = "type") %>%
-         filter(var == "Median time to severe [Min, Max]") %>%
-         mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))),
-       aes(y = value, x = type, fill = site)) + 
-  geom_bar(stat="identity", position = "dodge", colour="black") + 
-   scale_fill_brewer(palette = "Dark2") + 
-  ggtitle(" Median time to severe [Min, Max]")
-
-plot_grid(p13, p14)
+```{r echo=FALSE,message=FALSE, warning=FALSE, fig.height=10}
+other_table_for_figs %>%
+  mutate(me = stringr::word(var),
+         grouped_var = gsub('Mean |Median | \\[Min, Max\\]| \\(SD\\)', '', var)) %>% 
+    pivot_longer(
+      cols = None:Both,
+      names_to = "type"
+    ) %>% 
+  mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))) %>% 
+  ggplot(aes(y = value, x = type, fill = site)) +
+  facet_grid(vars(grouped_var), vars(me), scales = 'free') +
+  geom_bar(stat = "identity", position = "dodge", colour = "black") +
+  scale_fill_brewer(palette = "Dark2") +
+  labs(x = NULL, y = NULL, fill = NULL)
 ```
 
 
 ## Table One
 
 ```{r}
-ordered_vars <- c("all", "sex", "age_group", "race", 
-                  "readmitted", "severity", "survival")
-tableOne_inter <- combined_table_wide %>% 
-  group_by(variable, Demo_var, Demo_var_i) %>% 
-  summarise(across(starts_with('n_var'), 
-                   function(x) sum(x, na.rm = TRUE)))
+ordered_vars <- c(
+  "all", "sex", "age_group", "race",
+  "readmitted", "severity", "survival"
+)
+tableOne_inter <- combined_table_wide %>%
+  group_by(variable, Demo_var, Demo_var_i) %>%
+  summarise(across(
+    starts_with("n_var"),
+    function(x) sum(x, na.rm = TRUE)
+  ))
 
-row_order <- c("All Patients", "Female", "Male",
-                                       "0-2", "3-5", "6-11", "12-17", "18-25", 
-                                       "26-49", "50-69", "70-79", "80+", 
-                                       "American Indian", "Asian", "Black", 
-                                       "Hawaiian/Pacific Islander", 
-                                       "Hispanic/Latino", "Other", "White", 
-                                       "Median Elixhauser score [Min, Max]",
-                                       "Median length of stay [Min, Max]",
-                                       "Non-Severe", "Severe", 
-                                       "Median time to severe [Min, Max]",
-                                       "Alive", "Deceased", "Median time to death [Min, Max]",
-                                       "Not Readmitted","Readmitted", 
-                                       "Median time to first readmission [Min, Max]",
-                                       "Median number of readmissions [Min, Max]")
+row_order <- c(
+  "All Patients", "Female", "Male",
+  "0-2", "3-5", "6-11", "12-17", "18-25",
+  "26-49", "50-69", "70-79", "80+",
+  "American Indian", "Asian", "Black",
+  "Hawaiian/Pacific Islander",
+  "Hispanic/Latino", "Other", "White",
+  "Median Elixhauser score [Min, Max]",
+  "Median length of stay [Min, Max]",
+  "Non-Severe", "Severe",
+  "Median time to severe [Min, Max]",
+  "Alive", "Deceased", "Median time to death [Min, Max]",
+  "Not Readmitted", "Readmitted",
+  "Median time to first readmission [Min, Max]",
+  "Median number of readmissions [Min, Max]"
+)
 
-tableOne_compiled <- tableOne_inter %>% 
-  ungroup() %>% 
-  filter(Demo_var == 'sex') %>% 
-  summarise(across(where(is.numeric), sum)) %>% 
+tableOne_compiled <- tableOne_inter %>%
+  ungroup() %>%
+  filter(Demo_var == "sex") %>%
+  summarise(across(where(is.numeric), sum)) %>%
   data.frame(
-    variable = 'all',
-    Demo_var = 'all',
-             Demo_var_i = 'All Patients',
-             .) %>% 
+    variable = "all",
+    Demo_var = "all",
+    Demo_var_i = "All Patients",
+    .
+  ) %>%
   bind_rows(tableOne_inter) %>%
-  mutate(N = rowSums(across(where(is.numeric))),
-         Demo_var = factor(Demo_var, levels = ordered_vars)) %>% 
-  group_by(Demo_var) %>% 
-  mutate(across(starts_with('n_var'),
-                function(x)
-                    paste0(x, ' (', round(x / sum(x, na.rm = TRUE) * 100, 1), '%', ')')
-                )) %>%
-  ungroup() %>% 
-  arrange(Demo_var) %>% 
-  select(Demo_var_i, N, starts_with('n_var')) %>%
+  mutate(
+    N = rowSums(across(where(is.numeric))),
+    Demo_var = factor(Demo_var, levels = ordered_vars)
+  ) %>%
+  group_by(Demo_var) %>%
+  mutate(across(
+    starts_with("n_var"),
+    function(x) {
+      paste0(x, " (", round(x / sum(x, na.rm = TRUE) * 100, 1), "%", ")")
+    }
+  )) %>%
+  ungroup() %>%
+  arrange(Demo_var) %>%
+  select(Demo_var_i, N, starts_with("n_var")) %>%
   `colnames<-`(gsub(
     x = names(.),
     pattern = "n_var_",
     replacement = ""
-  )) %>% 
-  rename('Table 1' = Demo_var_i) %>%
+  )) %>%
+  rename("Table 1" = Demo_var_i) %>%
   bind_rows(other_table_compiled) %>%
-  slice(match(row_order, `Table 1`)) 
+  slice(match(row_order, `Table 1`))
 
 
 tableOne_compiled <- tableOne_compiled %>%
-  mutate(N = if_else(`Table 1` == "Median length of stay [Min, Max]", 
-                     tableOne_compiled %>% 
-                       filter(`Table 1` == "All Patients") %>% 
-                       select(N) %>%
-                       as.numeric(), N),
-         N = if_else(`Table 1` == "Median time to severe [Min, Max]",
-                     tableOne_compiled %>% 
-                       filter(`Table 1` == "Severe") %>% 
-                       select(N) %>%
-                       as.numeric(), N),
-         N = if_else(`Table 1` == "Median time to death [Min, Max]",
-                     tableOne_compiled %>% 
-                       filter(`Table 1` == "Deceased") %>% 
-                       select(N) %>%
-                       as.numeric(), N),
-         N = if_else(`Table 1` == "Median time to first readmission [Min, Max]",
-                     tableOne_compiled %>% 
-                       filter(`Table 1` == "Readmitted") %>% 
-                       select(N) %>%
-                       as.numeric(), N),
-         N = if_else(`Table 1` == "Median number of readmissions [Min, Max]",
-                     tableOne_compiled %>% 
-                       filter(`Table 1` == "Readmitted") %>% 
-                       select(N) %>%
-                       as.numeric(), N))
+  mutate(
+    N = if_else(`Table 1` == "Median length of stay [Min, Max]",
+      tableOne_compiled %>%
+        filter(`Table 1` == "All Patients") %>%
+        select(N) %>%
+        as.numeric(), N
+    ),
+    N = if_else(`Table 1` == "Median time to severe [Min, Max]",
+      tableOne_compiled %>%
+        filter(`Table 1` == "Severe") %>%
+        select(N) %>%
+        as.numeric(), N
+    ),
+    N = if_else(`Table 1` == "Median time to death [Min, Max]",
+      tableOne_compiled %>%
+        filter(`Table 1` == "Deceased") %>%
+        select(N) %>%
+        as.numeric(), N
+    ),
+    N = if_else(`Table 1` == "Median time to first readmission [Min, Max]",
+      tableOne_compiled %>%
+        filter(`Table 1` == "Readmitted") %>%
+        select(N) %>%
+        as.numeric(), N
+    ),
+    N = if_else(`Table 1` == "Median number of readmissions [Min, Max]",
+      tableOne_compiled %>%
+        filter(`Table 1` == "Readmitted") %>%
+        select(N) %>%
+        as.numeric(), N
+    )
+  )
 
 kbl(tableOne_compiled) %>%
   add_header_above(c(
@@ -414,10 +311,9 @@ kbl(tableOne_compiled) %>%
   pack_rows("Race & Ethnicity", 13, 19) %>%
   pack_rows("Comorbidites", 20, 20) %>%
   pack_rows("Hospital Course", 21, 21) %>%
-  pack_rows("Severity", 22, 24) %>% 
+  pack_rows("Severity", 22, 24) %>%
   pack_rows("Survival", 25, 27) %>%
   pack_rows("Readmission", 28, 31)
-
 ```
 
 ```{r fig.height=15, fig.width=11}
@@ -427,23 +323,22 @@ combined_table <- combined_table_wide %>%
     names_to = "Dx",
     values_to = "Count"
   ) %>%
-  replace_na(list(Count = 0)) %>% 
-  mutate(Dx = gsub('n_var_', '', Dx) %>% 
-           fct_relevel(c('None', 'Central', 'Peripheral', "Both")))
+  replace_na(list(Count = 0)) %>%
+  mutate(Dx = gsub("n_var_", "", Dx) %>%
+    fct_relevel(c("None", "Central", "Peripheral", "Both")))
 ```
 
 
 ## Figures
 
 ```{r echo=T, message=FALSE, warning=FALSE, results='hide'}
-race_dx <- combined_table %>% 
+race_dx <- combined_table %>%
   filter(Demo_var == "race") %>%
   mutate(Demo_var_i = as.factor(Demo_var_i))
 
-age_dx <- combined_table %>% 
+age_dx <- combined_table %>%
   filter(Demo_var == "age_group") %>%
   mutate(Demo_var_i = as.factor(Demo_var_i))
-
 ```
 
 ```{r gender-plot} 
@@ -451,47 +346,67 @@ showtext::showtext_auto()
 female <- intToUtf8(9792)
 male <- intToUtf8(9794)
 gender_count <- combined_table %>%
-  filter(Demo_var == "sex") %>% 
-  group_by(site, Demo_var_i) %>% 
-  summarise(total_count = sum(Count, na.rm = TRUE), .groups = 'drop')
+  filter(Demo_var == "sex") %>%
+  group_by(site, Demo_var_i) %>%
+  summarise(total_count = sum(Count, na.rm = TRUE), .groups = "drop")
 
-gender_plot <- gender_count %>% 
-  mutate(total_count = if_else(Demo_var_i == 'Male', - total_count, total_count)) %>%
-  ggplot(aes(y = fct_relevel(site, sorted_sites), 
-             x = total_count, color = Demo_var_i)) +
-  geom_col(position = 'identity', fill = 'grey70') +
-  scale_color_manual(values = c('white', 'white')) +
-  scale_x_continuous(breaks = c(-10000, -5000, -2000, 0, 2000, 5000),
-                     labels = c(10000, 5000, 2000, 0, 2000, 5000),
-                     trans = ggallin::ssqrt_trans) +
-  geom_vline(xintercept = 0, color = 'white') +
-  geom_text(data = . %>% filter(Demo_var_i == 'Male'),
-            aes(y = site, x = total_count - 22*sqrt(abs(total_count)),
-                label = abs(total_count)), color = 'grey10', size = 3) +
-  geom_text(data = . %>% filter(Demo_var_i == 'Female'),
-            aes(y = site, x = total_count + 19*sqrt(abs(total_count)),
-                label = abs(total_count)), color = 'grey10', size = 3) +
-  geom_text(data = . %>% filter(site == 'APHP', Demo_var_i == 'Female'),
-            aes(y = length(sorted_sites), x = total_count - 600), fontface = 2,
-            label = female, size = 3, color = 'white') +
-  geom_text(data = . %>% filter(site == 'APHP', Demo_var_i == 'Male'),
-            aes(y = length(sorted_sites), x = total_count + 600), fontface = 2,
-            label = male, size = 3, color = 'white') +
-  labs(y = NULL, 
-       x = 'Number of male/female patients per site', 
-       fill = NULL) +
-  theme(legend.position = 'None',
-        # plot.margin = margin(15, 5.5, 15.5, 55.5),
-        axis.ticks.y = element_blank(),
-        panel.grid.major.y = element_blank(),
-        panel.grid.minor = element_blank(),
-        panel.border = element_blank(),
-        panel.spacing.y = unit(0, 'pt'),
-        strip.background = element_blank(),
-        strip.placement = 'inside',
-        legend.background = element_blank(),
-        legend.key.height = unit(1, 'line'),
-        legend.title = element_text(hjust = 0, size = 9)) +
+gender_plot <- gender_count %>%
+  mutate(total_count = if_else(Demo_var_i == "Male", -total_count, total_count)) %>%
+  ggplot(aes(
+    y = fct_relevel(site, sorted_sites),
+    x = total_count, color = Demo_var_i
+  )) +
+  geom_col(position = "identity", fill = "grey70") +
+  scale_color_manual(values = c("white", "white")) +
+  scale_x_continuous(
+    breaks = c(-10000, -5000, -2000, 0, 2000, 5000),
+    labels = c(10000, 5000, 2000, 0, 2000, 5000),
+    trans = ggallin::ssqrt_trans
+  ) +
+  geom_vline(xintercept = 0, color = "white") +
+  geom_text(
+    data = . %>% filter(Demo_var_i == "Male"),
+    aes(
+      y = site, x = total_count - 22 * sqrt(abs(total_count)),
+      label = abs(total_count)
+    ), color = "grey10", size = 3
+  ) +
+  geom_text(
+    data = . %>% filter(Demo_var_i == "Female"),
+    aes(
+      y = site, x = total_count + 19 * sqrt(abs(total_count)),
+      label = abs(total_count)
+    ), color = "grey10", size = 3
+  ) +
+  geom_text(
+    data = . %>% filter(site == "APHP", Demo_var_i == "Female"),
+    aes(y = length(sorted_sites), x = total_count - 600), fontface = 2,
+    label = female, size = 3, color = "white"
+  ) +
+  geom_text(
+    data = . %>% filter(site == "APHP", Demo_var_i == "Male"),
+    aes(y = length(sorted_sites), x = total_count + 600), fontface = 2,
+    label = male, size = 3, color = "white"
+  ) +
+  labs(
+    y = NULL,
+    x = "Number of male/female patients per site",
+    fill = NULL
+  ) +
+  theme(
+    legend.position = "None",
+    # plot.margin = margin(15, 5.5, 15.5, 55.5),
+    axis.ticks.y = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.spacing.y = unit(0, "pt"),
+    strip.background = element_blank(),
+    strip.placement = "inside",
+    legend.background = element_blank(),
+    legend.key.height = unit(1, "line"),
+    legend.title = element_text(hjust = 0, size = 9)
+  ) +
   NULL
 ```
 
@@ -515,26 +430,33 @@ age_sum <- age_dx %>%
   select(site, Demo_var_i, Dx, Count) %>%
   distinct() %>%
   group_by(site, Demo_var_i) %>%
-  summarise(total_count = sum(Count, na.rm = TRUE),
-            .groups = 'drop') %>%
+  summarise(
+    total_count = sum(Count, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
   group_by(site) %>%
   mutate(freq = total_count / sum(total_count, na.rm = TRUE))
 
-cc <- scales::seq_gradient_pal("white", "#25796C")(seq(0,1,length.out = 10))[-1]
+cc <- scales::seq_gradient_pal("white", "#25796C")(seq(0, 1, length.out = 10))[-1]
 
-age_plot <- age_sum %>% 
- ggplot(aes(y = fct_relevel(site, sorted_sites), 
-            x = freq, fill = fct_rev(Demo_var_i))) + 
+age_plot <- age_sum %>%
+  ggplot(aes(
+    y = fct_reorder(site, freq * (-1 + 2 * (Demo_var_i == "
+80+"))),
+    x = freq, fill = fct_rev(Demo_var_i)
+  )) +
   geom_col() +
-  # scale_fill_viridis_d(direction = -1, option = 'D') + 
+  # scale_fill_viridis_d(direction = -1, option = 'D') +
   scale_fill_manual(values = cc) +
   scale_x_continuous(labels = scales::percent_format()) +
-  labs(x = 'Age group proportion', y = NULL, fill = NULL) +
+  labs(x = "Age group proportion", y = NULL, fill = NULL) +
   guides(fill = guide_legend(nrow = 1, reverse = TRUE)) +
   coord_cartesian(expand = FALSE) +
   theme(legend.position = "top") +
-  theme(panel.grid = element_blank(),
-        legend.key.height = unit(3, 'mm')) +
+  theme(
+    panel.grid = element_blank(),
+    legend.key.height = unit(3, "mm")
+  ) +
   NULL
 ```
 
@@ -557,141 +479,158 @@ race_sum <- race_dx %>%
   select(site, Demo_var_i, Dx, Count) %>%
   distinct() %>%
   group_by(site, Demo_var_i) %>%
-  summarise(total_count = sum(Count, na.rm = TRUE),
-            .groups = 'drop') %>%
+  summarise(
+    total_count = sum(Count, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
   group_by(site) %>%
   mutate(freq = total_count / sum(total_count, na.rm = TRUE))
 
 race_plot <- race_sum %>%
-  ggplot(aes(y = fct_relevel(site, sorted_sites), 
-             x = freq, fill = fct_rev(Demo_var_i))) + 
+  ggplot(aes(
+    y = fct_reorder(site, freq, .fun = max),
+    x = freq,
+    fill = fct_rev(Demo_var_i)
+  )) +
   geom_col() +
   rcartocolor::scale_fill_carto_d(palette = 6) +
   scale_x_continuous(labels = scales::percent_format()) +
-  labs(x = 'Race/ethnic group proportion', y = NULL, fill = NULL) +
+  labs(x = "Race/ethnic group proportion", y = NULL, fill = NULL) +
   guides(fill = guide_legend(nrow = 1, reverse = TRUE)) +
   coord_cartesian(expand = FALSE) +
   theme(legend.position = "top") +
-  theme(panel.grid = element_blank(),
-        legend.key.height = unit(3, 'mm')) +
+  theme(
+    panel.grid = element_blank(),
+    legend.key.height = unit(3, "mm")
+  ) +
   NULL
 ```
 
 ```{r combine-plots, fig.height=7, fig.width=9}
-cowplot::plot_grid(gender_plot, age_plot, race_plot, ncol = 1,
-                   rel_heights = c(1, 1.1, 0.75))
+cowplot::plot_grid(gender_plot, age_plot, race_plot,
+  ncol = 1,
+  rel_heights = c(1, 1.1, 0.75)
+)
 ```
 
 
 ## Other exploratory analyses
 
 ```{r echo=T, message=FALSE, warning=FALSE, results='hide'}
-neuro_types <- c('None', 'Central', 'Peripheral', 'Both')
+neuro_types <- c("None", "Central", "Peripheral", "Both")
 
 surv_plot <- combined_table %>%
   filter(Demo_var == "survival") %>%
-    mutate(Dx = gsub('n_var_', '', Dx) %>% fct_relevel(neuro_types)) %>% 
+  mutate(Dx = gsub("n_var_", "", Dx) %>% fct_relevel(neuro_types)) %>%
   ggplot(aes(
     x = Dx,
     y = Count,
     fill = Demo_var_i
   )) +
   # geom_violin(alpha = 0.2) +
-  geom_point(color = 'white', shape = 21, size = 3) +
-  scale_fill_manual(values =  c('#FFE3CB', '#E58605')) +
-  facet_wrap(~ Demo_var_i, scale = "free_y", nrow = 1) +
+  geom_point(color = "white", shape = 21, size = 3) +
+  scale_fill_manual(values = c("#FFE3CB", "#E58605")) +
+  facet_wrap(~Demo_var_i, scale = "free_y", nrow = 1) +
   xlab("") +
   ylab("") +
   theme_bw() +
   theme(legend.position = "none") +
-    NULL
+  NULL
 
 # scales::seq_gradient_pal("white", '#CC61AF')(seq(0,1,length.out = 10))[-1]
-severity_plot <- 
+severity_plot <-
   combined_table %>%
   filter(Demo_var == "severity") %>%
-    mutate(Dx = gsub('n_var_', '', Dx) %>% fct_relevel(neuro_types)) %>% 
+  mutate(Dx = gsub("n_var_", "", Dx) %>% fct_relevel(neuro_types)) %>%
   ggplot(aes(
     x = Demo_var_i,
     y = Count,
     fill = Demo_var_i
   )) +
   # geom_violin(alpha = 0.2) +
-  geom_point(color = 'white', shape = 21, size = 3) +
-  scale_fill_manual(values = c('#F6DCED', '#CC61AF')) +
-  facet_wrap(~ Dx, scale = "free_y", nrow = 1) +
+  geom_point(color = "white", shape = 21, size = 3) +
+  scale_fill_manual(values = c("#F6DCED", "#CC61AF")) +
+  facet_wrap(~Dx, scale = "free_y", nrow = 1) +
   xlab("") +
   ylab("") +
   theme_bw() +
   theme(legend.position = "none") +
-    NULL
+  NULL
 
-readmit_plot <- ggplot(combined_table %>%
-         filter(Demo_var == "readmitted") %>% 
-         filter(!Dx == "None"), 
-       aes(x = site, y = Count, group = site,
-                           fill = site)) + 
-  geom_bar(stat="identity", position = "dodge") + 
-  #coord_flip() +
-   scale_fill_viridis_d() + 
-  #rcartocolor::scale_fill_carto_d() +
-  facet_grid(Dx~Demo_var_i, scale = "free_y") + 
-  #facet_wrap(~Dx, nrow = 1) + 
-  xlab("") + 
-  ylab("") + 
-  theme_bw() + 
-  theme(legend.position = "none",
-        axis.text.x = element_text(size = 8, angle = 45, hjust = 1)) 
+readmit_plot <- ggplot(
+  combined_table %>%
+    filter(Demo_var == "readmitted") %>%
+    filter(!Dx == "None"),
+  aes(
+    x = site, y = Count, group = site,
+    fill = site
+  )
+) +
+  geom_bar(stat = "identity", position = "dodge") +
+  # coord_flip() +
+  scale_fill_viridis_d() +
+  # rcartocolor::scale_fill_carto_d() +
+  facet_grid(Dx ~ Demo_var_i, scale = "free_y") +
+  # facet_wrap(~Dx, nrow = 1) +
+  xlab("") +
+  ylab("") +
+  theme_bw() +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(size = 8, angle = 45, hjust = 1)
+  )
 
 # Create legend
 legend_b <- get_legend(
-  race_plot + 
+  race_plot +
     guides(color = guide_legend(nrow = 1)) +
-    theme(legend.position = "top",
-          legend.title = element_blank())
+    theme(
+      legend.position = "top",
+      legend.title = element_blank()
+    )
 )
 ```
 
 ```{r}
-combined_table %>% 
-  filter(Demo_var_i == 'Alive') %>% 
-  select(site, starts_with('prop')) %>% 
-  distinct() %>% 
-  pivot_longer(- site) %>% 
-  mutate(name = gsub('prop_', '', name) %>% fct_relevel(neuro_types)) %>% 
+combined_table %>%
+  filter(Demo_var_i == "Alive") %>%
+  select(site, starts_with("prop")) %>%
+  distinct() %>%
+  pivot_longer(-site) %>%
+  mutate(name = gsub("prop_", "", name) %>% fct_relevel(neuro_types)) %>%
   ggplot(aes(x = name, y = value, group = site, color = site)) +
-    geom_point() +
+  geom_point() +
   rcartocolor::scale_color_carto_d() +
   geom_line() +
-  scale_y_continuous(limits = c(0,1)) +
-  labs(x = NULL, y = 'Proportion survived', color = NULL) +
-  theme(legend.position = 'top') +
+  scale_y_continuous(limits = c(0, 1)) +
+  labs(x = NULL, y = "Proportion survived", color = NULL) +
+  theme(legend.position = "top") +
   NULL
 
-combined_table %>% 
-  filter(Demo_var_i == 'Alive') %>% 
-  select(site, starts_with('prop')) %>% 
-  distinct() %>% 
-  pivot_longer(- site) %>% 
-  mutate(name = gsub('prop_', '', name) %>% fct_relevel(neuro_types)) %>% 
+combined_table %>%
+  filter(Demo_var_i == "Alive") %>%
+  select(site, starts_with("prop")) %>%
+  distinct() %>%
+  pivot_longer(-site) %>%
+  mutate(name = gsub("prop_", "", name) %>% fct_relevel(neuro_types)) %>%
   ggplot(aes(x = name, y = value)) +
   geom_boxplot() +
-    geom_point() +
-  scale_y_continuous(limits = c(0,1)) +
-  labs(x = NULL, y = 'Proportion survived') +
+  geom_point() +
+  scale_y_continuous(limits = c(0, 1)) +
+  labs(x = NULL, y = "Proportion survived") +
   NULL
 
-combined_table %>% 
-  filter(Demo_var_i == 'Severe') %>% 
-  select(site, starts_with('prop')) %>% 
-  distinct() %>% 
-  pivot_longer(- site) %>% 
-  mutate(name = gsub('prop_', '', name) %>% fct_relevel(neuro_types)) %>%
+combined_table %>%
+  filter(Demo_var_i == "Severe") %>%
+  select(site, starts_with("prop")) %>%
+  distinct() %>%
+  pivot_longer(-site) %>%
+  mutate(name = gsub("prop_", "", name) %>% fct_relevel(neuro_types)) %>%
   ggplot(aes(x = name, y = value)) +
   geom_boxplot() +
-    geom_point() +
-  scale_y_continuous(limits = c(0,1)) +
-  labs(x = NULL, y = 'Proportion severe') +
+  geom_point() +
+  scale_y_continuous(limits = c(0, 1)) +
+  labs(x = NULL, y = "Proportion severe") +
   NULL
 ```
 
