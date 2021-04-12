@@ -36,7 +36,7 @@ site_google_url <- "https://docs.google.com/spreadsheets/d/1epcYNd_0jCUMktOHf8mz
 site_params <- googlesheets4::read_sheet(site_google_url, sheet = 1)
 site_avails <- googlesheets4::read_sheet(site_google_url, sheet = 2)
 sorted_sites <- site_avails %>%
-  filter(`data received` == 'Y') %>%
+  filter(`data received` == "Y") %>%
   pull(siteid)
 
 # sorted_sites <- rev(c(
@@ -96,7 +96,6 @@ combined_table_wide <- bind_rows(demo_table_list) %>%
         `True` = "Readmitted"
       )
   )
-
 ```
 
 ```{r}
@@ -115,7 +114,6 @@ combined_other_table_wide <- bind_rows(other_table_list) %>%
   filter(grepl("Mean|Median", name))
 
 vars_to_process <- unique(combined_other_table_wide$name)
-
 
 processed_list <- list()
 for (i in vars_to_process) {
@@ -144,14 +142,18 @@ for (i in vars_to_process) {
   processed_list[[i]] <- mod_table
 }
 
+# Mean of the median distribution is the best estimate for the median: 
+# It's the BLUE[est] (best least unbiased estimator).
 other_table_compiled <- bind_rows(processed_list, .id = "Table 1") %>%
-  select(-contains("mean")) %>%
+  # select(-contains("mean")) %>%
   filter(grepl("Median", `Table 1`)) %>%
+  mutate(across(ends_with('mean'), ~ round(., 1))) %>% 
+  # get average of the medians
   mutate(
-    None = glue("{None_median} [{None_min}, {None_max}]"),
-    Peripheral = glue("{Peripheral_median} [{Peripheral_min}, {Peripheral_max}]"),
-    Central = glue("{Central_median} [{Central_min}, {Central_max}]"),
-    Both = glue("{Both_median} [{Both_min}, {Both_max}]"),
+    None = glue("{None_mean} [{None_min}, {None_max}]"),
+    Peripheral = glue("{Peripheral_mean} [{Peripheral_min}, {Peripheral_max}]"),
+    Central = glue("{Central_mean} [{Central_min}, {Central_max}]"),
+    Both = glue("{Both_mean} [{Both_min}, {Both_max}]"),
     N = NA
   ) %>%
   select(`Table 1`, N, None, Peripheral, Central, Both)
@@ -182,20 +184,21 @@ other_table_for_figs <- bind_rows(processed_list_figs)
 
 ```{r echo=FALSE,message=FALSE, warning=FALSE, fig.height=10}
 other_table_for_figs %>%
-  mutate(me = stringr::word(var),
-         grouped_var = gsub('Mean |Median | \\[Min, Max\\]| \\(SD\\)', '', var)) %>% 
-    pivot_longer(
-      cols = None:Both,
-      names_to = "type"
-    ) %>% 
-  mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))) %>% 
+  mutate(
+    me = stringr::word(var),
+    grouped_var = gsub("Mean |Median | \\[Min, Max\\]| \\(SD\\)", "", var)
+  ) %>%
+  pivot_longer(
+    cols = None:Both,
+    names_to = "type"
+  ) %>%
+  mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))) %>%
   ggplot(aes(y = value, x = type, fill = site)) +
-  facet_grid(vars(grouped_var), vars(me), scales = 'free') +
+  facet_grid(vars(grouped_var), vars(me), scales = "free") +
   geom_bar(stat = "identity", position = "dodge", colour = "black") +
   scale_fill_brewer(palette = "Dark2") +
   labs(x = NULL, y = NULL, fill = NULL)
 ```
-
 
 ## Table One
 
@@ -209,7 +212,7 @@ tableOne_inter <- combined_table_wide %>%
   summarise(across(
     starts_with("n_var"),
     function(x) sum(x, na.rm = TRUE)
-  ))
+  ), .groups = 'drop')
 
 row_order <- c(
   "All Patients", "Female", "Male",
@@ -228,8 +231,13 @@ row_order <- c(
   "Median number of readmissions [Min, Max]"
 )
 
-tableOne_compiled <- tableOne_inter %>%
-  ungroup() %>%
+get_table_n <- function(var) {
+  tableOne_raw %>%
+    filter(`Table 1` == var) %>%
+    pull(N)
+}
+
+tableOne_raw <- tableOne_inter %>%
   filter(Demo_var == "sex") %>%
   summarise(across(where(is.numeric), sum)) %>%
   data.frame(
@@ -262,38 +270,15 @@ tableOne_compiled <- tableOne_inter %>%
   bind_rows(other_table_compiled) %>%
   slice(match(row_order, `Table 1`))
 
-
-tableOne_compiled <- tableOne_compiled %>%
+tableOne_compiled <- tableOne_raw %>%
   mutate(
-    N = if_else(`Table 1` == "Median length of stay [Min, Max]",
-      tableOne_compiled %>%
-        filter(`Table 1` == "All Patients") %>%
-        select(N) %>%
-        as.numeric(), N
-    ),
-    N = if_else(`Table 1` == "Median time to severe [Min, Max]",
-      tableOne_compiled %>%
-        filter(`Table 1` == "Severe") %>%
-        select(N) %>%
-        as.numeric(), N
-    ),
-    N = if_else(`Table 1` == "Median time to death [Min, Max]",
-      tableOne_compiled %>%
-        filter(`Table 1` == "Deceased") %>%
-        select(N) %>%
-        as.numeric(), N
-    ),
-    N = if_else(`Table 1` == "Median time to first readmission [Min, Max]",
-      tableOne_compiled %>%
-        filter(`Table 1` == "Readmitted") %>%
-        select(N) %>%
-        as.numeric(), N
-    ),
-    N = if_else(`Table 1` == "Median number of readmissions [Min, Max]",
-      tableOne_compiled %>%
-        filter(`Table 1` == "Readmitted") %>%
-        select(N) %>%
-        as.numeric(), N
+    N = case_when(
+      grepl("Median length of stay", `Table 1`) ~ get_table_n("All Patients"),
+      grepl("Median time to severe", `Table 1`) ~ get_table_n("Severe"),
+      grepl("death", `Table 1`) ~ get_table_n("Deceased"),
+      grepl("readmission", `Table 1`) ~ get_table_n("Readmitted"),
+      grepl("Median Elixhauser score", `Table 1`) ~ get_table_n("All Patients"),
+      TRUE ~ N
     )
   )
 
@@ -313,12 +298,13 @@ kbl(tableOne_compiled) %>%
   pack_rows("Severity", 22, 24) %>%
   pack_rows("Survival", 25, 27) %>%
   pack_rows("Readmission", 28, 31)
+
 ```
 
 ```{r fig.height=15, fig.width=11}
 combined_table <- combined_table_wide %>%
   pivot_longer(
-    cols = starts_with('n_var'),
+    cols = starts_with("n_var"),
     names_to = "Dx",
     values_to = "Count"
   ) %>%
@@ -326,7 +312,6 @@ combined_table <- combined_table_wide %>%
   mutate(Dx = gsub("n_var_", "", Dx) %>%
     fct_relevel(c("None", "Central", "Peripheral", "Both")))
 ```
-
 
 ## Figures
 
@@ -340,7 +325,7 @@ age_dx <- combined_table %>%
   mutate(Demo_var_i = as.factor(Demo_var_i))
 ```
 
-```{r gender-plot} 
+```{r gender-plot}
 showtext::showtext_auto()
 female <- intToUtf8(9792)
 male <- intToUtf8(9794)
@@ -439,10 +424,10 @@ age_sum <- age_dx %>%
 cc <- scales::seq_gradient_pal("white", "#25796C")(seq(0, 1, length.out = 11))[-1]
 
 age_plot <- age_sum %>%
-  mutate(Demo_var_i = Demo_var_i %>% fct_relevel("Other", after = 0)) %>% 
+  mutate(Demo_var_i = Demo_var_i %>% fct_relevel("Other", after = 0)) %>%
   ggplot(aes(
     # y = fct_reorder(site, freq * (1 + 20 * (Demo_var_i == "80+"))),
-    y = fct_reorder2(site, Demo_var_i, - freq),
+    y = fct_reorder2(site, Demo_var_i, -freq),
     x = freq, fill = fct_rev(Demo_var_i)
   )) +
   geom_col() +
@@ -460,12 +445,12 @@ age_plot <- age_sum %>%
   NULL
 ```
 
-
 ```{r race-plot}
 race_sum <- race_dx %>%
   mutate(Demo_var_i = fct_relevel(
     Demo_var_i,
-    c("Other",
+    c(
+      "Other",
       "Hawaiian/Pacific Islander",
       "American Indian",
       "Hispanic/Latino",
@@ -517,6 +502,7 @@ demo_plot
 ```
 
 ### LPCA deviance explained
+
 How much deviance is explained with 10 principal components for 30 comorbidity types?
 
 Across sites, 10 principal components explained above 75% of the deviance.
@@ -525,23 +511,23 @@ Across sites, 10 principal components explained above 75% of the deviance.
 pca_dev <- list()
 for (i in results) {
   tmp <- get(i)
-  if (!is.null(tmp$deviance_expl))
+  if (!is.null(tmp$deviance_expl)) {
     pca_dev[[i]] <- data.frame(site = tmp$site, dev_expl = tmp$deviance_expl)
+  }
 }
 
-# site_avails %>% 
-#   filter(`data received` == 'Y') %>% 
-#   pull(siteid) %>% 
+# site_avails %>%
+#   filter(`data received` == 'Y') %>%
+#   pull(siteid) %>%
 #   setdiff(bind_rows(pca_dev) %>% pull(site))
 
-bind_rows(pca_dev) %>% 
-  ggplot(aes(x = fct_reorder(site, - dev_expl), y = dev_expl, group = 1)) +
+bind_rows(pca_dev) %>%
+  ggplot(aes(x = fct_reorder(site, -dev_expl), y = dev_expl, group = 1)) +
   geom_point() +
   geom_line() +
   coord_cartesian(ylim = c(0, 1)) +
-  labs(y = 'Comorbidity LPCA deviance explained', x = NULL)
+  labs(y = "Comorbidity LPCA deviance explained", x = NULL)
 ```
-
 
 ## Other exploratory analyses
 
