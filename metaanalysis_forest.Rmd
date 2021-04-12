@@ -3,6 +3,8 @@ title: "Metaanalysis"
 output: html_document
 ---
 
+**Note: When running plots for CNS, PNS, or CNS/PNS, pay attention to ```rownames_change```, this is not automated yet**
+
 ```{r message=FALSE, warning=FALSE}
 library(tidyverse)
 library(meta)
@@ -15,19 +17,22 @@ library(gridExtra)
 library(tidyverse)
 library(patchwork)
 library(stringr)
+#library(devtools)
 #devtools::install_github("rdboyes/forester")
 library(forester)
 ```
 
 ```{r}
-load('results/NWU_results.rda')
-load('results/UPENN_results.rda')
-load('results/UPITT_results.rda')
-load('results/APHP_results.rda')
-load('results/FRBDX_results.rda')
-load('results/ICSM_results.rda')
-load('results/MGB_results.rda')
-load('results/HPG23_results.rda')
+rdas <- list.files(
+  path = "results",
+  pattern = ".rda",
+  full.names = TRUE
+)
+for (rda in rdas) {
+  load(rda)
+}
+
+site_results <- mget(ls(pattern = "result"))
 ```
 
 ## Conduct Random-Effects Meta-Analysis
@@ -70,9 +75,7 @@ outcomes <-
 meta_results <- list()
 for (outcome_i in outcomes) {
   meta_results[[outcome_i]] <-
-    list(NWU_results, UPENN_results, UPITT_results, 
-         APHP_results, ICSM_results, FRBDX_results, 
-         MGB_results, HPG23_results) %>% # add other results here
+    site_results %>% # add other results here
     lapply(get_result_row, outcome = outcome_i) %>%
     bind_rows() %>%
     metagen(
@@ -132,7 +135,6 @@ combined_results <- combined_results %>% mutate(TE = round(TE,2),
                                                 Weight = round(Weight,1),
                                                 CI.High = round(upper, 1),
                                                 CI.Low = round(lower, 1),
-                                                #CI = paste("(", CI.Low, ",", CI.High, ")"),
                                                 TE.random = round(TE.random, 1),
                                                 lower.random = round(lower.random, 1), 
                                                 upper.random = round(upper.random, 1),
@@ -163,14 +165,19 @@ Add blank rows to facilitate formatting
 
 ```{r}
 df_new <- as.data.frame(lapply(combined_results, as.character), stringsAsFactors = FALSE)
-combined_results <- head(do.call(rbind, by(df_new, combined_results$analysis, rbind, "")), -1 )
+# add two blank rows
+combined_results <- head(do.call(rbind, by(df_new, combined_results$analysis, rbind, "", "")), -1)
 
+# add row to top row
 combined_results <- combined_results %>% 
+  add_row(.before = 1) %>%
   add_row(.before = 1)
-```
 
-hide NA values using a space
-```{r}
+# remove last row
+combined_results <- combined_results %>% 
+  head(-1)
+
+# convert NA to blank rows
 combined_results[is.na(combined_results)] <- ""
 ```
 
@@ -180,50 +187,44 @@ Carry over name of the analysis to the blank row
 combined_results$Site <- as.character(combined_results$Site)
 combined_results$analysis <- as.character(combined_results$analysis)
 
-combined_results <- combined_results %>% 
-  mutate(Site = if_else(Site == "", lead(analysis), Site)) %>%
-  select(-analysis) %>%
-  rename("Analysis" = Site)
-```
+combined_results[combined_results == ""] <- NA
 
-```{r}
-combined_results$Estimate <- as.numeric(as.character(combined_results$Estimate))
-combined_results$seTE <- as.numeric(as.character(combined_results$seTE))
-combined_results$Weight <- as.numeric(as.character(combined_results$Weight))
-combined_results$CI.High <- as.numeric(as.character(combined_results$CI.High))
-combined_results$CI.Low <- as.numeric(as.character(combined_results$CI.Low))
-combined_results$TE.random <- as.numeric(as.character(combined_results$TE.random))
-combined_results$p.value <- as.numeric(as.character(combined_results$p.value))
-combined_results$I2 <- as.numeric(as.character(combined_results$I2))
+# Add the analysis labels to the original site level rows - these will be our labels for the forest plots
+combined_results <- combined_results %>% 
+  fill(analysis, .direction = "up") %>%
+  mutate(id = seq_len(nrow(.)),
+         Site = if_else(is.na(Site), analysis, Site),
+         lag_Site = lag(Site),
+         lag_Site = if_else(is.na(lag_Site), "First", lag_Site),
+         Site = ifelse(Site == lag_Site, paste(Site, "_", id), Site)) %>% 
+  select(-analysis, -lag_Site) %>%
+  rename("Analysis" = Site) 
 ```
 
 Indent site results
 
 ```{r}
+combined_results$Estimate <- as.numeric(as.character(combined_results$Estimate))
 combined_results$Analysis <- ifelse(is.na(combined_results$Estimate),
                          combined_results$Analysis,
                          paste0("   ", combined_results$Analysis))
 ```
 
-Manually change row names to make it easier to subset
+Manually change row names to make it easier to subset the data by analysis for the forest plots
 
 ```{r}
-rownames_change <- combined_results %>% filter(is.na(Estimate)) %>% row.names()
+rownames(combined_results) <- ifelse(is.na(combined_results$Estimate),
+                                     paste(combined_results$Analysis),
+                                     rownames(combined_results))
 
-rownames(combined_results)[rownames(combined_results) == "...1"] <- "Length of Stay"
-rownames(combined_results)[rownames(combined_results) == "Length of Stay.8"] <- "Severe"
-rownames(combined_results)[rownames(combined_results) == "Severe COVID-19.91"] <- "Mortality"
-rownames(combined_results)[rownames(combined_results) == "Mortality.8"] <- "Number of Readmissions"
-rownames(combined_results)[rownames(combined_results) == "Number of Readmissions.9"] <- "Readmission"
-rownames(combined_results)[rownames(combined_results) == "Readmission.9"] <- "Time to Severity"
-rownames(combined_results)[rownames(combined_results) == "Time to Severity.8"] <- "Time to Mortality"
-rownames(combined_results)[rownames(combined_results) == "Time to Mortality.8"] <- "Time to of Readmission"
+# make the secondary analysis label blank
+combined_results <- combined_results %>%
+  mutate(Analysis = ifelse(grepl("_", Analysis), NA, Analysis))
 ```
 
-Additional formatting to integrate the mixed-effect meta analysis results with the regression estimates
+Additional formatting to integrate the random-effects meta analysis results with the regression estimates
 
 ```{r}
-combined_results$Estimate <- as.numeric(as.character(combined_results$Estimate))
 combined_results$seTE <- as.numeric(as.character(combined_results$seTE))
 combined_results$Weight <- as.numeric(as.character(combined_results$Weight))
 combined_results$CI.High <- as.numeric(as.character(combined_results$CI.High))
@@ -242,7 +243,6 @@ combined_results$TE.random <- ifelse(is.na(combined_results$Estimate), combined_
 combined_results$p.value <- ifelse(is.na(combined_results$Estimate), combined_results$p.value, NA)
 combined_results$I2 <- ifelse(is.na(combined_results$Estimate), combined_results$I2, NA)
 combined_results$CI <- ifelse(is.na(combined_results$Estimate), combined_results$CI, NA)
-
 
 # convert back to numeric
 combined_results$upper.random <- as.numeric(as.character(combined_results$upper.random))
@@ -268,127 +268,192 @@ combined_results <- combined_results %>%
 
 combined_results$p.value_format <- ifelse(combined_results$p.value_round < 0.00001, "< 0.00001", combined_results$p.value_round)
          
-combined_results <- combined_results %>% 
-  mutate(p.value_format2 = sprintf("%.5f", combined_results$p.value))
-
-combined_results$p.value_format <- ifelse(combined_results$p.value_format == "< 0.00001", combined_results$p.value_format, combined_results$p.value_format2)
-
+# if p-value is significant add an asterick
 combined_results <- combined_results %>%
   mutate(`P-value` = if_else(sig == 1, paste(p.value_format, "*"), p.value_format))
 
 combined_results$p.value[combined_results$p.value == "NA"] <- ""
 
 combined_results[is.na(combined_results)] <- ""
+
+# make sure the row of the second analysis label is blank
+cols <- colnames(combined_results)
+
+combined_results[ ,cols] <- as.data.frame(lapply(cols, 
+              FUN = function(x) ifelse(combined_results$Analysis == "", "", combined_results[, x])))
+
+
+# convert back to numeric
+combined_results$Estimate <- as.numeric(as.character(combined_results$Estimate))
+combined_results$CI.High <- as.numeric(as.character(combined_results$CI.High))
+combined_results$CI.Low <- as.numeric(as.character(combined_results$CI.Low))
 ```
 
+## Results
 
-## Readmission, Severity, & Mortality
+### Length of Stay
 
 ```{r fig.width=8, message=FALSE, warning=FALSE}
-toMatch <- c("Severe", "Mortality", "Readmission")
+length_stay_results <- combined_results %>% 
+  slice(grep(paste("Length of Stay", collapse="|"), row.names(.)))
 
-binary_results <- combined_results %>% 
-  slice(grep(paste(toMatch, collapse="|"), row.names(.))) %>% 
+forester(left_side_data = length_stay_results[1],
+         estimate = length_stay_results$Estimate,
+         ci_low = length_stay_results$CI.Low,
+         ci_high = length_stay_results$CI.High,
+         right_side_data = length_stay_results[,c("Estimate ", "P-value")],
+         display = TRUE,
+         font_family = "arial",
+         arrows = TRUE, 
+         arrow_labels = c("Decreased Length", "Increased Length of Stay"),
+         xlim = c(-40,30),
+         xbreaks = c(-40, 0, 30),
+         file_path = here::here("figures/Forest_plot_length_of_stay.png"))
+```
+
+### Readmission
+
+```{r fig.width=8, message=FALSE, warning=FALSE}
+readmit_results <- combined_results %>% 
+  slice(grep(paste("Readmission", collapse="|"), row.names(.))) %>% 
   filter(!grepl('Number|Time', row.names(.)))
 
-forester(left_side_data = binary_results[1],
-         estimate = binary_results$Estimate,
-         ci_low = binary_results$CI.Low,
-         ci_high = binary_results$CI.High,
-         right_side_data = binary_results[,c(13,18)],
+forester(left_side_data = readmit_results[1],
+         estimate = readmit_results$Estimate,
+         ci_low = readmit_results$CI.Low,
+         ci_high = readmit_results$CI.High,
+         right_side_data = readmit_results[,c("Estimate ", "P-value")],
          display = TRUE,
          font_family = "arial",
          arrows = TRUE, 
          arrow_labels = c("Decreased Risk", "Increased Risk"),
-         xlim = c(-4,4),
-         xbreaks = c(-4, 0, 4),
-         file_path = here::here("readmission_severity_mortality.png"))
+         xlim = c(-1,1),
+         xbreaks = c(-1, 0, 1),
+         file_path = here::here("figures/Forest_plot_readmission.png"))
 ```
 
-## Time to Events
 
-```{r message=FALSE, warning=FALSE}
-toMatch <- c("Time")
+### Severe COVID-19 
 
-time_results <- combined_results %>% 
-  slice(grep(paste(toMatch, collapse="|"), row.names(.))) %>% 
-  filter(!grepl('Readmission', row.names(.)))
+```{r fig.width=8, message=FALSE, warning=FALSE}
+severe_results <- combined_results %>% 
+  slice(grep(paste("Severe", collapse="|"), row.names(.))) %>% 
+  filter(!grepl('Time', row.names(.)))
 
-forester(left_side_data = time_results[1],
-         estimate = time_results$Estimate,
-         ci_low = time_results$CI.Low,
-         ci_high = time_results$CI.High,
-         right_side_data = time_results[,c(13,18)],
+forester(left_side_data = severe_results[1],
+         estimate = severe_results$Estimate,
+         ci_low = severe_results$CI.Low,
+         ci_high = severe_results$CI.High,
+         right_side_data = severe_results[,c("Estimate ", "P-value")],
+         display = TRUE,
+         font_family = "arial",
+         arrows = TRUE, 
+         arrow_labels = c("Decreased Risk", "Increased Risk"),
+         xlim = c(-1,3),
+         xbreaks = c(-1, 0, 3),
+         file_path = here::here("figures/Forest_plot_severe.png"))
+```
+
+### Mortality
+
+```{r fig.width=8, message=FALSE, warning=FALSE}
+death_results <- combined_results %>% 
+  slice(grep(paste("Mortality", collapse="|"), row.names(.))) %>% 
+  filter(!grepl('Time', row.names(.)))
+
+forester(left_side_data = death_results[1],
+         estimate = death_results$Estimate,
+         ci_low = death_results$CI.Low,
+         ci_high = death_results$CI.High,
+         right_side_data = death_results[,c("Estimate ", "P-value")],
+         display = TRUE,
+         font_family = "arial",
+         arrows = TRUE, 
+         arrow_labels = c("Decreased Risk", "Increased Risk"),
+         xlim = c(-1,2),
+         xbreaks = c(-1, 0, 2),
+         file_path = here::here("figures/Forest_plot_death.png"))
+```
+
+### Time to Severity
+
+```{r fig.width=8, message=FALSE, warning=FALSE}
+severe_time_results <- combined_results %>% 
+  slice(grep(paste("Time to Severity", collapse="|"), row.names(.)))
+
+forester(left_side_data = severe_time_results[1],
+         estimate = severe_time_results$Estimate,
+         ci_low = severe_time_results$CI.Low,
+         ci_high = severe_time_results$CI.High,
+         right_side_data = severe_time_results[,c("Estimate ", "P-value")],
          display = TRUE,
          font_family = "arial",
          arrows = TRUE, 
          arrow_labels = c("Decreased Time", "Increased Time"),
-         xlim = c(-16,20),
-         xbreaks = c(-16, 0, 20),
-         file_path = here::here("time_to_events.png"))
+         xlim = c(-12.5,5.5),
+         xbreaks = c(-12.5, 0, 5.5),
+         file_path = here::here("figures/Forest_plot_severe_time.png"))
 ```
 
-```{r fig.height=6, fig.width=8, message=FALSE, warning=FALSE}
-toMatch <- c("Time")
+### Time to Death
 
-time_results2 <- combined_results %>% 
-  slice(grep(paste(toMatch, collapse="|"), row.names(.))) %>% 
-  filter(!grepl('Mortality|Severity', row.names(.)))
+```{r fig.width=8, message=FALSE, warning=FALSE}
+death_time_results <- combined_results %>% 
+  slice(grep(paste("Time to Mortality", collapse="|"), row.names(.)))
 
-forester(left_side_data = time_results2[1],
-         estimate = time_results2$Estimate,
-         ci_low = time_results2$CI.Low,
-         ci_high = time_results2$CI.High,
-         right_side_data = time_results2[,c(13,18)],
+forester(left_side_data = death_time_results[1],
+         estimate = death_time_results$Estimate,
+         ci_low = death_time_results$CI.Low,
+         ci_high = death_time_results$CI.High,
+         right_side_data = death_time_results[,c("Estimate ", "P-value")],
+         display = TRUE,
+         font_family = "arial",
+         arrows = TRUE, 
+         arrow_labels = c("Decreased Risk", "Increased Risk"),
+         xlim = c(-35,46),
+         xbreaks = c(-35, 0, 46),
+         file_path = here::here("figures/Forest_plot_death_time.png"))
+```
+
+
+### Time to Readmission
+
+```{r fig.width=8, message=FALSE, warning=FALSE}
+readmit_time_results <- combined_results %>% 
+  slice(grep(paste("Time to Readmission", collapse="|"), row.names(.)))
+
+forester(left_side_data = readmit_time_results[1],
+         estimate = readmit_time_results$Estimate,
+         ci_low = readmit_time_results$CI.Low,
+         ci_high = readmit_time_results$CI.High,
+         right_side_data = readmit_time_results[,c("Estimate ", "P-value")],
          display = TRUE,
          font_family = "arial",
          arrows = TRUE, 
          arrow_labels = c("Decreased Time", "Increased Time"),
-         xlim = c(-45,45),
-         xbreaks = c(-45, 0, 45),
-         file_path = here::here("time_to_events2.png"))
+         xlim = c(-85,75),
+         xbreaks = c(-85, 0, 75),
+         file_path = here::here("figures/Forest_plot_readmission_time.png"))
 ```
 
-## Length Stay
+### Number of Readmissions
 
-```{r message=FALSE, warning=FALSE}
-toMatch <- c("Length")
+```{r fig.width=8, message=FALSE, warning=FALSE}
+readmit_n_results <- combined_results %>% 
+  slice(grep(paste("Number of Readmissions", collapse="|"), row.names(.)))
 
-day_results <- combined_results %>% 
-  slice(grep(paste(toMatch, collapse="|"), row.names(.)))
-
-forester(left_side_data = day_results[1],
-         estimate = day_results$Estimate,
-         ci_low = day_results$CI.Low,
-         ci_high = day_results$CI.High,
-         right_side_data = day_results[,c(13,18)],
+forester(left_side_data = readmit_n_results[1],
+         estimate = readmit_n_results$Estimate,
+         ci_low = readmit_n_results$CI.Low,
+         ci_high = readmit_n_results$CI.High,
+         right_side_data = readmit_n_results[,c("Estimate ", "P-value")],
          display = TRUE,
          font_family = "arial",
          arrows = TRUE, 
-         arrow_labels = c("Decreased Length", "Increased Length"),
-         xlim = c(-5,25),
-         xbreaks = c(-5, 0, 25),
-         file_path =here::here("length_of_stay.png"))
-```
-
-## Days to Readmissions
-
-```{r message=FALSE, warning=FALSE}
-toMatch <- c("Number of Readmissions")
-
-nday_results <- combined_results %>% 
-  slice(grep(paste(toMatch, collapse="|"), row.names(.)))
-
-forester(left_side_data = nday_results[1],
-         estimate = nday_results$Estimate,
-         ci_low = nday_results$CI.Low,
-         ci_high = nday_results$CI.High,
-         right_side_data = nday_results[,c(13,18)],
-         display = TRUE,
-         font_family = "arial",
-         arrows = TRUE, 
-         arrow_labels = c("Decreased Length", "Increased Length"),
+         arrow_labels = c("Decreased Readmissions", "Increased Readmissions"),
          xlim = c(-1,1.5),
          xbreaks = c(-1, 0, 1.5),
-         file_path = here::here("n_readmissions.png"))
+         file_path = here::here("figures/Forest_plot_readmission_n.png"))
 ```
+
+
