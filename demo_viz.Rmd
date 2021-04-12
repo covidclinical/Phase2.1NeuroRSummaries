@@ -112,7 +112,71 @@ for (i in results) {
 
 combined_other_table_wide <- bind_rows(other_table_list) %>%
   filter(grepl("Mean|Median", name))
+```
 
+
+```{r fig.height=10}
+medians_df <- combined_other_table_wide %>%
+  filter(grepl("Median", name)) %>%
+  pivot_longer(None:Both, names_to = "neuro_type") %>%
+  replace_na(list(value = "0 [0, 0]")) %>%
+  mutate(
+    median_val = as.numeric(gsub(" \\[[^()]*\\]", "", value)),
+    min_max = gsub("\\[([^()]*)\\]|.", "\\1", value, perl = T),
+    # min_val = as.numeric(gsub("^(.*?),.*", "\\1", min_max)),
+    min_val = as.numeric(gsub(",.*$", "", min_max)),
+    max_val = as.numeric(gsub(".*,\\s*", "", min_max)),
+    grouped_var = gsub("Mean |Median | \\[Min, Max\\]| \\(SD\\)", "", name)
+  ) %>%
+  mutate_if(is.numeric, function(x) ifelse(is.infinite(x), 0, x))
+# medians_df[!is.finite(medians_df)] <- 0
+medians_df %>%
+  ggplot(aes(x = neuro_type, color = site)) +
+  # geom_point() +
+  geom_pointrange(
+    size = 0.2,
+    aes(
+      y = median_val,
+      ymin = min_val,
+      ymax = max_val
+    ),
+    position = position_dodge2(width = 0.8)
+  ) +
+  facet_grid(rows = vars(grouped_var), scales = "free") +
+  # scale_color_brewer(palette = "Dark2") +
+  rcartocolor::scale_color_carto_d() +
+  labs(y = "Median [Min, Max]", x = "Neurological conditions")
+```
+
+
+```{r fig.height=10}
+alpha_threshold <- qnorm(0.975)
+means_df <- combined_other_table_wide %>%
+  filter(grepl("Mean", name)) %>%
+  pivot_longer(None:Both, names_to = "neuro_type") %>%
+  replace_na(list(value = "0 (0)")) %>%
+  mutate(
+    mean_val = as.numeric(gsub(" \\([^()]*\\)", "", value)),
+    se_val = as.numeric(gsub("\\(([^()]*)\\)|.", "\\1", value, perl = T)),
+    grouped_var = gsub("Mean |Median | \\[Min, Max\\]| \\(SD\\)", "", name)
+  ) 
+means_df %>%
+  ggplot(aes(x = neuro_type, color = site)) +
+  geom_pointrange(
+    size = 0.2,
+    aes(
+      x = neuro_type, y = mean_val,
+      ymin = mean_val - alpha_threshold*se_val,
+      ymax = mean_val + alpha_threshold*se_val,
+    ),
+    position = position_dodge2(width = 0.8)
+  ) +
+  facet_grid(rows = vars(grouped_var), scales = "free") +
+  rcartocolor::scale_color_carto_d() +
+  labs(y = "Mean [95% CI]", x = "Neurological conditions")
+```
+
+```{r}
 vars_to_process <- unique(combined_other_table_wide$name)
 
 processed_list <- list()
@@ -142,12 +206,12 @@ for (i in vars_to_process) {
   processed_list[[i]] <- mod_table
 }
 
-# Mean of the median distribution is the best estimate for the median: 
+# Mean of the median distribution is the best estimate for the median:
 # It's the BLUE[est] (best least unbiased estimator).
 other_table_compiled <- bind_rows(processed_list, .id = "Table 1") %>%
   # select(-contains("mean")) %>%
   filter(grepl("Median", `Table 1`)) %>%
-  mutate(across(ends_with('mean'), ~ round(., 1))) %>% 
+  mutate(across(ends_with("mean"), ~ round(., 1))) %>%
   # get average of the medians
   mutate(
     None = glue("{None_mean} [{None_min}, {None_max}]"),
@@ -212,7 +276,7 @@ tableOne_inter <- combined_table_wide %>%
   summarise(across(
     starts_with("n_var"),
     function(x) sum(x, na.rm = TRUE)
-  ), .groups = 'drop')
+  ), .groups = "drop")
 
 row_order <- c(
   "All Patients", "Female", "Male",
@@ -298,7 +362,6 @@ kbl(tableOne_compiled) %>%
   pack_rows("Severity", 22, 24) %>%
   pack_rows("Survival", 25, 27) %>%
   pack_rows("Readmission", 28, 31)
-
 ```
 
 ```{r fig.height=15, fig.width=11}
