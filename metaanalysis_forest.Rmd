@@ -3,7 +3,6 @@ title: "Metaanalysis"
 output: html_document
 ---
 
-**Note: When running plots for CNS, PNS, or CNS/PNS, pay attention to ```rownames_change```, this is not automated yet**
 
 ```{r message=FALSE, warning=FALSE}
 library(tidyverse)
@@ -11,15 +10,14 @@ library(meta)
 library(gridGraphics)
 library(gridExtra)
 library(ggpubr)
-library(DT)
-library(kableExtra)
 library(gridExtra)
 library(tidyverse)
 library(patchwork)
 library(stringr)
 #library(devtools)
 #devtools::install_github("rdboyes/forester")
-library(forester)
+#library(forester)
+source("R/forester_custom.R")
 ```
 
 ```{r}
@@ -210,7 +208,7 @@ combined_results$Analysis <- ifelse(is.na(combined_results$Estimate),
                          paste0("   ", combined_results$Analysis))
 ```
 
-Manually change row names to make it easier to subset the data by analysis for the forest plots
+Change row names to make it easier to subset the data by analysis for the forest plots
 
 ```{r}
 rownames(combined_results) <- ifelse(is.na(combined_results$Estimate),
@@ -259,8 +257,9 @@ combined_results$CI.Low <- ifelse(is.na(combined_results$CI.Low), combined_resul
 combined_results$CI.High <- as.numeric(as.character(combined_results$CI.High))
 combined_results$CI.Low <- as.numeric(as.character(combined_results$CI.Low))
 
-# create new 'Estimate' column that we can have CIs - this will allow a nicer 
+# create new 'Estimate' column that we can have CIs 
 # format the p-values so we don't lose trailing zeros which occurs with as.character()
+# the below steps seem long but best way as of now to ensure that we can add < signs and astericks when dealing with numeric and character data 
 combined_results <- combined_results %>% 
   mutate('Estimate ' = paste(Estimate, "(", CI.Low, ",", CI.High, ")"),
          p.value_round = round(p.value, 5),
@@ -268,7 +267,11 @@ combined_results <- combined_results %>%
 
 combined_results$p.value_format <- ifelse(combined_results$p.value_round < 0.00001, "< 0.00001", combined_results$p.value_round)
          
-# if p-value is significant add an asterick
+combined_results <- combined_results %>% 
+  mutate(p.value_format2 = sprintf("%.5f", combined_results$p.value))
+
+combined_results$p.value_format <- ifelse(combined_results$p.value_format == "< 0.00001", combined_results$p.value_format, combined_results$p.value_format2)
+
 combined_results <- combined_results %>%
   mutate(`P-value` = if_else(sig == 1, paste(p.value_format, "*"), p.value_format))
 
@@ -287,6 +290,11 @@ combined_results[ ,cols] <- as.data.frame(lapply(cols,
 combined_results$Estimate <- as.numeric(as.character(combined_results$Estimate))
 combined_results$CI.High <- as.numeric(as.character(combined_results$CI.High))
 combined_results$CI.Low <- as.numeric(as.character(combined_results$CI.Low))
+
+# make the secondary analysis label blank
+combined_results <- combined_results %>%
+  mutate(Analysis = as.character(Analysis),
+         Analysis = ifelse(is.na(Estimate), "Site", Analysis))
 ```
 
 ## Results
@@ -297,6 +305,18 @@ combined_results$CI.Low <- as.numeric(as.character(combined_results$CI.Low))
 length_stay_results <- combined_results %>% 
   slice(grep(paste("Length of Stay", collapse="|"), row.names(.)))
 
+## define forest plot shapes
+# shape #16 is normal circle; #18 is diamond
+shapes <- rep(16, times = nrow(length_stay_results))
+shapes[1] <- 18
+
+sizes <- rep(3.25, times = nrow(length_stay_results))
+sizes[1] <- 5
+
+# point_colors <- rep("black", times = nrow(length_stay_results))
+# point_colors[1] <- "blue"
+
+
 forester(left_side_data = length_stay_results[1],
          estimate = length_stay_results$Estimate,
          ci_low = length_stay_results$CI.Low,
@@ -306,8 +326,10 @@ forester(left_side_data = length_stay_results[1],
          font_family = "arial",
          arrows = TRUE, 
          arrow_labels = c("Decreased Length", "Increased Length of Stay"),
-         xlim = c(-40,30),
-         xbreaks = c(-40, 0, 30),
+         xlim = c(-1,22),
+         xbreaks = c(-1, 0, 30),
+         point_sizes = sizes,
+         point_shapes = shapes,
          file_path = here::here("figures/Forest_plot_length_of_stay.png"))
 ```
 
@@ -317,6 +339,12 @@ forester(left_side_data = length_stay_results[1],
 readmit_results <- combined_results %>% 
   slice(grep(paste("Readmission", collapse="|"), row.names(.))) %>% 
   filter(!grepl('Number|Time', row.names(.)))
+
+shapes <- rep(16, times = nrow(readmit_results))
+shapes[1] <- 18
+
+sizes <- rep(3.25, times = nrow(readmit_results))
+sizes[1] <- 5
 
 forester(left_side_data = readmit_results[1],
          estimate = readmit_results$Estimate,
@@ -329,6 +357,8 @@ forester(left_side_data = readmit_results[1],
          arrow_labels = c("Decreased Risk", "Increased Risk"),
          xlim = c(-1,1),
          xbreaks = c(-1, 0, 1),
+         point_sizes = sizes,
+         point_shapes = shapes,
          file_path = here::here("figures/Forest_plot_readmission.png"))
 ```
 
@@ -339,6 +369,12 @@ forester(left_side_data = readmit_results[1],
 severe_results <- combined_results %>% 
   slice(grep(paste("Severe", collapse="|"), row.names(.))) %>% 
   filter(!grepl('Time', row.names(.)))
+
+shapes <- rep(16, times = nrow(severe_results))
+shapes[1] <- 18
+
+sizes <- rep(3.25, times = nrow(severe_results))
+sizes[1] <- 5
 
 forester(left_side_data = severe_results[1],
          estimate = severe_results$Estimate,
@@ -351,6 +387,8 @@ forester(left_side_data = severe_results[1],
          arrow_labels = c("Decreased Risk", "Increased Risk"),
          xlim = c(-1,3),
          xbreaks = c(-1, 0, 3),
+         point_sizes = sizes,
+         point_shapes = shapes,
          file_path = here::here("figures/Forest_plot_severe.png"))
 ```
 
@@ -360,6 +398,12 @@ forester(left_side_data = severe_results[1],
 death_results <- combined_results %>% 
   slice(grep(paste("Mortality", collapse="|"), row.names(.))) %>% 
   filter(!grepl('Time', row.names(.)))
+
+shapes <- rep(16, times = nrow(death_results))
+shapes[1] <- 18
+
+sizes <- rep(3.25, times = nrow(death_results))
+sizes[1] <- 5
 
 forester(left_side_data = death_results[1],
          estimate = death_results$Estimate,
@@ -372,6 +416,8 @@ forester(left_side_data = death_results[1],
          arrow_labels = c("Decreased Risk", "Increased Risk"),
          xlim = c(-1,2),
          xbreaks = c(-1, 0, 2),
+         point_sizes = sizes,
+         point_shapes = shapes,
          file_path = here::here("figures/Forest_plot_death.png"))
 ```
 
@@ -380,6 +426,12 @@ forester(left_side_data = death_results[1],
 ```{r fig.width=8, message=FALSE, warning=FALSE}
 severe_time_results <- combined_results %>% 
   slice(grep(paste("Time to Severity", collapse="|"), row.names(.)))
+
+shapes <- rep(16, times = nrow(severe_time_results))
+shapes[1] <- 18
+
+sizes <- rep(3.25, times = nrow(severe_time_results))
+sizes[1] <- 5
 
 forester(left_side_data = severe_time_results[1],
          estimate = severe_time_results$Estimate,
@@ -392,6 +444,8 @@ forester(left_side_data = severe_time_results[1],
          arrow_labels = c("Decreased Time", "Increased Time"),
          xlim = c(-12.5,5.5),
          xbreaks = c(-12.5, 0, 5.5),
+         point_sizes = sizes,
+         point_shapes = shapes,
          file_path = here::here("figures/Forest_plot_severe_time.png"))
 ```
 
@@ -400,6 +454,12 @@ forester(left_side_data = severe_time_results[1],
 ```{r fig.width=8, message=FALSE, warning=FALSE}
 death_time_results <- combined_results %>% 
   slice(grep(paste("Time to Mortality", collapse="|"), row.names(.)))
+
+shapes <- rep(16, times = nrow(death_time_results))
+shapes[1] <- 18
+
+sizes <- rep(3.25, times = nrow(death_time_results))
+sizes[1] <- 5
 
 forester(left_side_data = death_time_results[1],
          estimate = death_time_results$Estimate,
@@ -410,8 +470,10 @@ forester(left_side_data = death_time_results[1],
          font_family = "arial",
          arrows = TRUE, 
          arrow_labels = c("Decreased Risk", "Increased Risk"),
-         xlim = c(-35,46),
-         xbreaks = c(-35, 0, 46),
+         xlim = c(-17,17),
+         xbreaks = c(-17, 0, 17),
+         point_sizes = sizes,
+         point_shapes = shapes,
          file_path = here::here("figures/Forest_plot_death_time.png"))
 ```
 
@@ -421,6 +483,12 @@ forester(left_side_data = death_time_results[1],
 ```{r fig.width=8, message=FALSE, warning=FALSE}
 readmit_time_results <- combined_results %>% 
   slice(grep(paste("Time to Readmission", collapse="|"), row.names(.)))
+
+shapes <- rep(16, times = nrow(readmit_time_results))
+shapes[1] <- 18
+
+sizes <- rep(3.25, times = nrow(readmit_time_results))
+sizes[1] <- 5
 
 forester(left_side_data = readmit_time_results[1],
          estimate = readmit_time_results$Estimate,
@@ -433,6 +501,8 @@ forester(left_side_data = readmit_time_results[1],
          arrow_labels = c("Decreased Time", "Increased Time"),
          xlim = c(-85,75),
          xbreaks = c(-85, 0, 75),
+         point_sizes = sizes,
+         point_shapes = shapes,
          file_path = here::here("figures/Forest_plot_readmission_time.png"))
 ```
 
@@ -441,6 +511,12 @@ forester(left_side_data = readmit_time_results[1],
 ```{r fig.width=8, message=FALSE, warning=FALSE}
 readmit_n_results <- combined_results %>% 
   slice(grep(paste("Number of Readmissions", collapse="|"), row.names(.)))
+
+shapes <- rep(16, times = nrow(readmit_n_results))
+shapes[1] <- 18
+
+sizes <- rep(3.25, times = nrow(readmit_n_results))
+sizes[1] <- 5
 
 forester(left_side_data = readmit_n_results[1],
          estimate = readmit_n_results$Estimate,
@@ -453,6 +529,8 @@ forester(left_side_data = readmit_n_results[1],
          arrow_labels = c("Decreased Readmissions", "Increased Readmissions"),
          xlim = c(-1,1.5),
          xbreaks = c(-1, 0, 1.5),
+         point_sizes = sizes,
+         point_shapes = shapes,
          file_path = here::here("figures/Forest_plot_readmission_n.png"))
 ```
 
