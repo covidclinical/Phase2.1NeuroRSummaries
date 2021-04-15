@@ -159,15 +159,15 @@ means_df <- combined_other_table_wide %>%
     mean_val = as.numeric(gsub(" \\([^()]*\\)", "", value)),
     se_val = as.numeric(gsub("\\(([^()]*)\\)|.", "\\1", value, perl = T)),
     grouped_var = gsub("Mean |Median | \\[Min, Max\\]| \\(SD\\)", "", name)
-  ) 
+  )
 means_df %>%
   ggplot(aes(x = neuro_type, color = site)) +
   geom_pointrange(
     size = 0.2,
     aes(
       x = neuro_type, y = mean_val,
-      ymin = mean_val - alpha_threshold*se_val,
-      ymax = mean_val + alpha_threshold*se_val,
+      ymin = mean_val - alpha_threshold * se_val,
+      ymax = mean_val + alpha_threshold * se_val,
     ),
     position = position_dodge2(width = 0.8)
   ) +
@@ -552,6 +552,76 @@ race_plot <- race_sum %>%
   ) +
   NULL
 ```
+
+```{r}
+my_breaks <- function(x) {
+  if (max(x) < 0.2) {
+    NULL
+  } else if (max(x) < 0.8) {
+    seq(0, 1, 0.2)
+  } else {
+    seq(0.2, 1, 0.2)
+  }
+}
+
+race_plot2 <- race_sum %>%
+  ggplot(aes(
+    # y = fct_reorder2(site, Demo_var_i, freq),
+    y = site,
+    x = freq,
+    fill = fct_rev(Demo_var_i)
+  )) +
+  geom_col() +
+  rcartocolor::scale_fill_carto_d(palette = 6) +
+  scale_x_continuous(
+    breaks = my_breaks,
+    labels = scales::percent_format(accuracy = 1)
+  ) +
+  labs(x = "Race/ethnic group proportion", y = NULL, fill = NULL) +
+  guides(fill = guide_legend(nrow = 1, reverse = TRUE)) +
+  coord_cartesian(expand = FALSE) +
+  theme(legend.position = "top") +
+  facet_grid(cols = vars(Demo_var_i), scales = "free", space = "free") +
+  theme(
+    strip.background = element_blank(),
+    strip.text.x = element_blank(),
+    panel.grid = element_blank(),
+    legend.key.height = unit(3, "mm"),
+    panel.spacing = unit(0, "lines")
+  ) +
+  NULL
+```
+
+
+```{r}
+age_plot2 <- age_sum %>%
+  mutate(Demo_var_i = Demo_var_i %>% fct_relevel("Other", after = 0)) %>%
+  ggplot(aes(
+    y = site,
+    x = freq, fill = fct_rev(Demo_var_i)
+  )) +
+  geom_col() +
+  # scale_fill_viridis_d(direction = -1, option = 'D') +
+  scale_fill_manual(values = cc) +
+  scale_x_continuous(
+    breaks = my_breaks,
+    labels = scales::percent_format(accuracy = 1)) +
+  labs(x = "Age group proportion", y = NULL, fill = NULL) +
+  guides(fill = guide_legend(nrow = 1, reverse = TRUE)) +
+  coord_cartesian(expand = FALSE) +
+  facet_grid(cols = vars(Demo_var_i), scales = "free", space = "free") +
+  theme(legend.position = "top") +
+  theme(
+    # strip.background = element_blank(),
+    # strip.text.x = element_blank(),
+    panel.grid = element_blank(),
+    legend.key.height = unit(3, "mm"),
+    panel.spacing = unit(0, "lines")
+  )  +
+  NULL
+age_plot2
+```
+
 
 ```{r combine-plots, fig.height=7, fig.width=9}
 demo_plot <- cowplot::plot_grid(gender_plot, age_plot, race_plot,
