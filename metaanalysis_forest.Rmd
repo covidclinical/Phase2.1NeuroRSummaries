@@ -50,7 +50,7 @@ get_result_row <- function(df,
                            outcome = 'n_stay_reg_elix',
                            period = 'first_hosp_results',
                            neuro_type = 'cpns_results',
-                           neuro_chr = 'neuro_postCentral') {
+                           neuro_chr = 'neuro_postBoth') {
   # neuro_chr <- switch(neuro_type,
   #   cpns_results = 'neuro_postPeripheral',
   #   binary_results = 'neuro_postneuro_cond'
