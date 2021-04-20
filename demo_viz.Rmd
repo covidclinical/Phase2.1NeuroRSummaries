@@ -71,9 +71,12 @@ for (i in results) {
 }
 combined_table_wide <- bind_rows(demo_table_list) %>%
   # site level differences in variable names require tolower()
+  # rename race.other to avoid recoding conflicts with age_group.other
   mutate(
     site = toupper(site),
     variable = tolower(variable),
+    variable = if_else(variable == "race.other", "race.Other", variable),
+    variable = if_else(variable == "age_group.other", "age_group.Unknown", variable),
     Demo_var = sub("\\..*", "", variable),
     Demo_var_i = sub(".*\\.", "", variable) %>%
       gsub("_", " ", .) %>%
@@ -180,6 +183,7 @@ means_df %>%
 vars_to_process <- unique(combined_other_table_wide$name)
 
 processed_list <- list()
+
 for (i in vars_to_process) {
   mod_table <- combined_other_table_wide %>%
     rename("var" = name) %>%
@@ -281,7 +285,7 @@ tableOne_inter <- combined_table_wide %>%
 row_order <- c(
   "All Patients", "Female", "Male",
   "0-2", "3-5", "6-11", "12-17", "18-25",
-  "26-49", "50-69", "70-79", "80+",
+  "26-49", "50-69", "70-79", "80+", "Unknown",
   "American Indian", "Asian", "Black",
   "Hawaiian/Pacific Islander",
   "Hispanic/Latino", "Other", "White",
@@ -355,13 +359,13 @@ kbl(tableOne_compiled) %>%
   )) %>%
   kable_paper("striped", full_width = F) %>%
   pack_rows("Gender", 2, 3) %>%
-  pack_rows("Age", 4, 12) %>%
-  pack_rows("Race & Ethnicity", 13, 19) %>%
-  pack_rows("Comorbidites", 20, 20) %>%
-  pack_rows("Hospital Course", 21, 21) %>%
-  pack_rows("Severity", 22, 24) %>%
-  pack_rows("Survival", 25, 27) %>%
-  pack_rows("Readmission", 28, 31)
+  pack_rows("Age", 4, 13) %>%
+  pack_rows("Race & Ethnicity", 14, 20) %>%
+  pack_rows("Comorbidites", 21, 21) %>%
+  pack_rows("Hospital Course", 22, 22) %>%
+  pack_rows("Severity", 23, 25) %>%
+  pack_rows("Survival", 26, 28) %>%
+  pack_rows("Readmission", 29, 32)
 ```
 
 ```{r fig.height=15, fig.width=11}
