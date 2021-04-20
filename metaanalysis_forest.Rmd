@@ -73,7 +73,7 @@ outcomes <-
 meta_results <- list()
 for (outcome_i in outcomes) {
   meta_results[[outcome_i]] <-
-    site_results %>% # add other results here
+    site_results %>% 
     lapply(get_result_row, outcome = outcome_i) %>%
     bind_rows() %>%
     metagen(
@@ -83,7 +83,7 @@ for (outcome_i in outcomes) {
       sm = 'MD',
       comb.random = TRUE,
       comb.fixed = FALSE,
-      #method.tau = "SJ",
+      method.tau = "DL", # default tau
       hakn = FALSE,
       prediction=TRUE,
       studlab = site
@@ -92,60 +92,50 @@ for (outcome_i in outcomes) {
 }
 ```
 
-_Note_: We will probably want to examine PNS and Both later.
-
 ```{r}
 ma_combine = list()
 
 for (i in names(meta_results)) {
   TE = meta_results[[i]][["TE"]]
-  seTE = meta_results[[i]][["seTE"]]
   studlab = meta_results[[i]][["studlab"]]
-  Weight = meta_results[[i]][["w.random"]]
   upper = meta_results[[i]][["upper"]]
   lower = meta_results[[i]][["lower"]]
   TE.random = meta_results[[i]][["TE.random"]]
   lower.random = meta_results[[i]][["lower.random"]]
   upper.random = meta_results[[i]][["upper.random"]]
   pval.random = meta_results[[i]][["pval.random"]]
+  Weight.random = meta_results[[i]][["w.random"]]
+  lower.predict = meta_results[[i]][["lower.predict"]]
+  upper.predict = meta_results[[i]][["upper.predict"]]
   I2 = meta_results[[i]][["I2"]]
+  lower.I2 = meta_results[[i]][["lower.I2"]]
+  upper.I2 = meta_results[[i]][["upper.I2"]]
+  H = meta_results[[i]][["H"]]
+  lower.H = meta_results[[i]][["H"]]
+  upper.H = meta_results[[i]][["upper.H"]]
+  tau2 = meta_results[[i]][["tau2"]]
+  lower.tau2 = meta_results[[i]][["lower.tau2"]]
+  upper.tau2 = meta_results[[i]][["upper.tau2"]]
   analysis = paste(i)
-  df <- cbind(studlab, TE, seTE, Weight, upper, lower, TE.random, lower.random, upper.random,
-              pval.random, I2,analysis)
+  df <- cbind(analysis, studlab, TE, upper, lower, TE.random, lower.random, upper.random, Weight.random,
+              pval.random, lower.predict, upper.predict, I2, lower.I2, upper.I2, H, lower.H, upper.H, 
+              tau2, lower.tau2, upper.tau2)
   ma_combine[[i]] <- df
 }
 
 combined_results <- do.call(rbind.data.frame, ma_combine)
-combined_results$TE <- as.numeric(as.character(combined_results$TE))
-combined_results$seTE <- as.numeric(as.character(combined_results$seTE))
-combined_results$Weight <- as.numeric(as.character(combined_results$Weight))
-combined_results$upper <- as.numeric(as.character(combined_results$upper))
-combined_results$lower <- as.numeric(as.character(combined_results$lower))
-combined_results$TE.random <- as.numeric(as.character(combined_results$TE.random))
-combined_results$lower.random <- as.numeric(as.character(combined_results$lower.random))
-combined_results$upper.random <- as.numeric(as.character(combined_results$upper.random))
-combined_results$pval.random <- as.numeric(as.character(combined_results$pval.random))
-combined_results$I2 <- as.numeric(as.character(combined_results$I2))
 
-
-combined_results <- combined_results %>% mutate(TE = round(TE,2),
-                                                seTE = round(seTE,4),
-                                                Weight = round(Weight,1),
-                                                CI.High = round(upper, 1),
-                                                CI.Low = round(lower, 1),
-                                                TE.random = round(TE.random, 1),
-                                                lower.random = round(lower.random, 1), 
-                                                upper.random = round(upper.random, 1),
-                                                CI.random = paste("(", lower.random, ",", upper.random, ")"),
-                                                #pval.random = round(pval.random, 4),
-                                                I2 = round(I2, 2)*100) %>%
-  select(-upper, -lower) %>%
+combined_results <- combined_results %>%
+  mutate_at(vars(TE:upper.tau2), ~ as.character(.) %>% as.numeric()) %>% 
+  mutate_at(vars(TE:upper.tau2, -pval.random), ~ round(., 2)) %>%
+  mutate(CI.random = paste("(", lower.random, ",", upper.random, ")")) %>%
   rename("Site" = studlab, 
          "Estimate" = TE, 
          "p-value" = pval.random,
+         "CI.High" = upper,
+         "CI.Low" = lower,
          "CI" = CI.random)
                                                 
-
 
 # Record analysis name to look nicer
 combined_results$analysis <- recode(combined_results$analysis,
@@ -182,9 +172,7 @@ combined_results[is.na(combined_results)] <- ""
 Carry over name of the analysis to the blank row
 
 ```{r}
-combined_results$Site <- as.character(combined_results$Site)
-combined_results$analysis <- as.character(combined_results$analysis)
-
+# first convert blank spaces to NA
 combined_results[combined_results == ""] <- NA
 
 # Add the analysis labels to the original site level rows - these will be our labels for the forest plots
@@ -195,14 +183,17 @@ combined_results <- combined_results %>%
          lag_Site = lag(Site),
          lag_Site = if_else(is.na(lag_Site), "First", lag_Site),
          Site = ifelse(Site == lag_Site, paste(Site, "_", id), Site)) %>% 
-  select(-analysis, -lag_Site) %>%
+  select(-analysis, -lag_Site, -id) %>%
   rename("Analysis" = Site) 
 ```
 
 Indent site results
 
 ```{r}
-combined_results$Estimate <- as.numeric(as.character(combined_results$Estimate))
+# convert columns back to numeric
+combined_results <- combined_results %>%
+  mutate_at(vars(Estimate:upper.tau2), ~ as.character(.) %>% as.numeric())
+
 combined_results$Analysis <- ifelse(is.na(combined_results$Estimate),
                          combined_results$Analysis,
                          paste0("   ", combined_results$Analysis))
@@ -223,60 +214,39 @@ combined_results <- combined_results %>%
 Additional formatting to integrate the random-effects meta analysis results with the regression estimates
 
 ```{r}
-combined_results$seTE <- as.numeric(as.character(combined_results$seTE))
-combined_results$Weight <- as.numeric(as.character(combined_results$Weight))
-combined_results$CI.High <- as.numeric(as.character(combined_results$CI.High))
-combined_results$CI.Low <- as.numeric(as.character(combined_results$CI.Low))
-combined_results$TE.random <- as.numeric(as.character(combined_results$TE.random))
-combined_results$I2 <- as.numeric(as.character(combined_results$I2))
-combined_results$p.value <- as.numeric(as.character(combined_results$p.value))
+# select the variables representing results from the overall meta-analysis 
+overall_results <- c("TE.random", "upper.random", "lower.random", "p.value", "CI", 
+       "lower.predict", 'upper.predict', 'I2', 'lower.I2', 'upper.I2', 'H', 
+       'lower.H', 'upper.H', 'tau2', 'lower.tau2', 'upper.tau2')
 
-combined_results[combined_results == ""] <- NA
-
+# fill these columns up to the first overall meta-analysis results row where there are currently NAs
 combined_results <- combined_results %>%
-  fill(TE.random, upper.random, lower.random, p.value, CI, .direction = "up")
+  fill(overall_results, .direction = "up")
 
-# Make the site level information NA for the following columns
-combined_results$TE.random <- ifelse(is.na(combined_results$Estimate), combined_results$TE.random, NA)
-combined_results$p.value <- ifelse(is.na(combined_results$Estimate), combined_results$p.value, NA)
-combined_results$I2 <- ifelse(is.na(combined_results$Estimate), combined_results$I2, NA)
-combined_results$CI <- ifelse(is.na(combined_results$Estimate), combined_results$CI, NA)
-
-# convert back to numeric
-combined_results$upper.random <- as.numeric(as.character(combined_results$upper.random))
-combined_results$lower.random <- as.numeric(as.character(combined_results$lower.random))
+# subsequently, make the site level information NA for the following columns
+combined_results <- combined_results %>% 
+  mutate_at(vars(overall_results), ~ ifelse(is.na(Estimate), .x, NA))
 
 # move meta analysis results to the same columns as the site regression estimates 
 combined_results$Estimate <- ifelse(is.na(combined_results$Estimate), combined_results$TE.random, combined_results$Estimate)
-
 combined_results$CI.High <- ifelse(is.na(combined_results$CI.High), combined_results$upper.random, combined_results$CI.High)
-
 combined_results$CI.Low <- ifelse(is.na(combined_results$CI.Low), combined_results$lower.random, combined_results$CI.Low)
 
-# convert back to numeric
-combined_results$CI.High <- as.numeric(as.character(combined_results$CI.High))
-combined_results$CI.Low <- as.numeric(as.character(combined_results$CI.Low))
-
-# create new 'Estimate' column that we can have CIs 
+# create new 'Estimate' column that we can append CIs 
 # format the p-values so we don't lose trailing zeros which occurs with as.character()
 # the below steps seem long but best way as of now to ensure that we can add < signs and astericks when dealing with numeric and character data 
 combined_results <- combined_results %>% 
   mutate('Estimate ' = paste(Estimate, "(", CI.Low, ",", CI.High, ")"),
          p.value_round = round(p.value, 5),
-         sig = if_else(p.value < 0.05, 1, 0))
+         sig = if_else(p.value < 0.05, 1, 0),
+         p.value_format = ifelse(p.value_round < 0.00001, "< 0.00001", p.value_round),
+         p.value_format2 = sprintf("%.5f", p.value),
+         p.value_format = ifelse(p.value_format == "< 0.00001", p.value_format, p.value_format2),
+         `P-value` = if_else(sig == 1, paste(p.value_format, "*"), p.value_format)) %>%
+  select(-p.value_round, -p.value_format, -p.value_format2, -sig)
 
-combined_results$p.value_format <- ifelse(combined_results$p.value_round < 0.00001, "< 0.00001", combined_results$p.value_round)
-         
-combined_results <- combined_results %>% 
-  mutate(p.value_format2 = sprintf("%.5f", combined_results$p.value))
-
-combined_results$p.value_format <- ifelse(combined_results$p.value_format == "< 0.00001", combined_results$p.value_format, combined_results$p.value_format2)
-
-combined_results <- combined_results %>%
-  mutate(`P-value` = if_else(sig == 1, paste(p.value_format, "*"), p.value_format))
 
 combined_results$p.value[combined_results$p.value == "NA"] <- ""
-
 combined_results[is.na(combined_results)] <- ""
 
 # make sure the row of the second analysis label is blank
@@ -287,15 +257,25 @@ combined_results[ ,cols] <- as.data.frame(lapply(cols,
 
 
 # convert back to numeric
-combined_results$Estimate <- as.numeric(as.character(combined_results$Estimate))
-combined_results$CI.High <- as.numeric(as.character(combined_results$CI.High))
-combined_results$CI.Low <- as.numeric(as.character(combined_results$CI.Low))
-
 # make the secondary analysis label blank
-combined_results <- combined_results %>%
+combined_results <- combined_results %>% 
+  mutate_at(vars(overall_results, Estimate, Weight.random, CI.High, CI.Low), ~ as.character(.) %>% as.numeric()) %>%
   mutate(Analysis = as.character(Analysis),
-         Analysis = ifelse(is.na(Estimate), "Site", Analysis))
+         Analysis = ifelse(is.na(Estimate), "Site", Analysis)) %>%
+  select(-TE.random, -lower.random, -upper.random)
 ```
+
+### Clean up results dataframe
+
+```{r eval=FALSE, include=FALSE}
+results_table <- combined_results %>% 
+  select(Analysis, `Estimate `, Weight.random, p.value,
+         lower.predict, upper.predict,
+         I2, lower.I2, upper.I2,
+         H, lower.H, upper.H,
+         tau2, lower.tau2, upper.tau2)
+```
+
 
 ## Results
 
