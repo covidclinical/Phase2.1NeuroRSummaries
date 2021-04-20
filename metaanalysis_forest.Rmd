@@ -37,10 +37,14 @@ site_results <- mget(ls(pattern = "result"))
 
 Here we conduct meta-analysis on outcomes occurring within the first hospital stay.
 
+**Note: Can run meta-analysis on effects of specific neuro_post type by setting changing ```neuro_chr``` in the get_result_row to ```neuro_postCentral```, ```neuro_postPeripheral``` or ```neuro_postBoth```**
+
 ```{r}
 get_site <- function(x){
   x$site
 }
+
+
 
 get_result_row <- function(df,
                            outcome = 'n_stay_reg_elix',
@@ -83,7 +87,7 @@ for (outcome_i in outcomes) {
       sm = 'MD',
       comb.random = TRUE,
       comb.fixed = FALSE,
-      method.tau = "DL", # default tau
+      method.tau = "DL", # default tau method
       hakn = FALSE,
       prediction=TRUE,
       studlab = site
@@ -273,7 +277,20 @@ results_table <- combined_results %>%
          lower.predict, upper.predict,
          I2, lower.I2, upper.I2,
          H, lower.H, upper.H,
-         tau2, lower.tau2, upper.tau2)
+         tau2, lower.tau2, upper.tau2) %>% 
+  mutate(Predict.CI = paste("(", lower.predict, ",", upper.predict, ")"),
+         I2.CI = paste("(", lower.I2, ",", upper.I2, ")"),
+         H.CI = paste("(", lower.H, ",", upper.H, ")"),
+         tau2.CI = paste("(", lower.tau2, ",", upper.tau2, ")")) %>%
+  select(-lower.predict, -upper.predict, -lower.I2, -upper.I2, -lower.H, -upper.H, -lower.tau2, -upper.tau2, 
+         Analysis, `Estimate `, Weight.random, p.value, Predict.CI, I2, I2.CI, H, H.CI, tau2, tau2.CI)
+
+results_table[results_table == "( NA , NA )"] <- ""
+results_table[is.na(results_table)] <- ""
+
+
+write.csv(results_table, file = paste0("meta_tables/meta_tables", meta_results[["n_stay_reg_elix"]][["data"]][["term"]][[1]], ".csv"), 
+          row.names = FALSE, )
 ```
 
 
