@@ -50,7 +50,7 @@ get_result_row <- function(df,
                            outcome = 'n_stay_reg_elix',
                            period = 'first_hosp_results',
                            neuro_type = 'cpns_results',
-                           neuro_chr = 'neuro_postCentral') {
+                           neuro_chr = 'neuro_postBoth') {
   # neuro_chr <- switch(neuro_type,
   #   cpns_results = 'neuro_postPeripheral',
   #   binary_results = 'neuro_postneuro_cond'
@@ -282,8 +282,8 @@ results_table <- combined_results %>%
          I2.CI = paste("(", lower.I2, ",", upper.I2, ")"),
          H.CI = paste("(", lower.H, ",", upper.H, ")"),
          tau2.CI = paste("(", lower.tau2, ",", upper.tau2, ")")) %>%
-  select(-lower.predict, -upper.predict, -lower.I2, -upper.I2, -lower.H, -upper.H, -lower.tau2, -upper.tau2, 
-         Analysis, `Estimate `, Weight.random, p.value, Predict.CI, I2, I2.CI, H, H.CI, tau2, tau2.CI)
+  select(-lower.predict, -upper.predict, -lower.I2, -upper.I2, -lower.H, -upper.H, -lower.tau2, -upper.tau2) %>% 
+  select(Analysis, `Estimate `, Weight.random, p.value, Predict.CI, I2, I2.CI, H, H.CI, tau2, tau2.CI)
 
 results_table[results_table == "( NA , NA )"] <- ""
 results_table[is.na(results_table)] <- ""
