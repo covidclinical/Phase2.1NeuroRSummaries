@@ -36,7 +36,7 @@ site_google_url <- "https://docs.google.com/spreadsheets/d/1epcYNd_0jCUMktOHf8mz
 site_params <- googlesheets4::read_sheet(site_google_url, sheet = 1)
 site_avails <- googlesheets4::read_sheet(site_google_url, sheet = 2)
 sorted_sites <- site_avails %>%
-  filter(`data received` == "Y") %>%
+  filter(`data received` == "Y", is.na(excluded)) %>%
   pull(siteid)
 
 # sorted_sites <- rev(c(
@@ -44,7 +44,7 @@ sorted_sites <- site_avails %>%
 # ))
 
 sites_wo_race <- site_params %>%
-  filter(include_race == FALSE) %>%
+  filter(!include_race) %>%
   pull(siteid)
 
 # colorBlindGrey6 <-
