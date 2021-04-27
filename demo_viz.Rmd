@@ -380,6 +380,87 @@ combined_table <- combined_table_wide %>%
     fct_relevel(c("None", "Central", "Peripheral", "Both")))
 ```
 
+### Diagnoses
+
+```{r}
+load("public-data/neuro_icds_10.rda")
+load("public-data/neuro_icds_9.rda")
+
+neuro_icds_10 <- neuro_icds_10 %>%
+  select(icd, `Neurological Disease Category`, pns_cns, `ICD-10 Description`) %>%
+  rename("description" = `ICD-10 Description`) %>%
+  mutate(concept_type = "icd-10")
+
+neuro_icds_9 <- neuro_icds_9 %>%
+  select(icd, `Neurological Disease Category`, pns_cns, icd_description) %>% 
+  rename("description" = icd_description) %>%
+  mutate(concept_type = "icd-9")
+
+icds <- rbind(neuro_icds_10, neuro_icds_9)
+
+diag_table_list <- list()
+
+for (i in results) {
+  tmp <- get(i)
+  tmp_diag <- tmp[[c(
+    "first_hosp_results",
+    "icd_tables",
+    "demo_table"
+  )]]
+  tmp_diag$site <- tmp[["site"]]
+  diag_table_list[[i]] <- tmp_diag %>%
+    filter(variable == "sex.female" | variable == "sex.male") %>% 
+    select(site, contains("n_var"))
+}
+
+diag_table_wide <- bind_rows(diag_table_list)
+
+
+diag_counts <- colSums(Filter(is.numeric, diag_table_wide), na.rm = TRUE) %>% data.frame()
+
+diag_counts <- tibble::rownames_to_column(diag_counts, "icd") %>%
+  mutate(icd = gsub("n_var_", "", icd)) %>% 
+  rename("sum" = '.') %>%
+  left_join(., icds, by = "icd") %>%
+  group_by(`Neurological Disease Category`) %>% 
+  mutate(sum_neuro_cat = sum(sum)) %>% 
+  arrange(desc(sum_neuro_cat)) 
+
+datatable(diag_counts)
+```
+
+### Comordities
+
+```{r}
+comorb_table_list <- list()
+
+for (i in results) {
+  tmp <- get(i)
+  tmp_comorb <- tmp[[c(
+    "first_hosp_results",
+    "binary_results",
+    "elix_obfus_table1"
+  )]]
+  tmp_comorb$site <- tmp[["site"]]
+  comorb_table_list[[i]] <- tmp_comorb %>%
+    select(site, Comorbidity, n_Total)
+}
+comorb_table_wide <- bind_rows(comorb_table_list) %>%
+  pivot_wider(id_cols = "site",
+              names_from = "Comorbidity", 
+              values_from = "n_Total")
+
+comorb_counts <- colSums(Filter(is.numeric, comorb_table_wide), na.rm = TRUE) %>% 
+  data.frame()
+
+comorb_counts <- tibble::rownames_to_column(comorb_counts, "Comorbidity") %>%
+  rename("total" = '.') %>%
+  arrange(desc(total))
+
+datatable(comorb_counts)
+```
+
+
 ## Figures
 
 ```{r echo=T, message=FALSE, warning=FALSE, results='hide'}
