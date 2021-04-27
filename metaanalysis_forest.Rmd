@@ -30,7 +30,22 @@ for (rda in rdas) {
   load(rda)
 }
 
+rm(rdas, rda)
+
+# create a list of all rda files with "result" suffix
 site_results <- mget(ls(pattern = "result"))
+
+# check for sites we may want to exclude
+site_google_url <- "https://docs.google.com/spreadsheets/d/1epcYNd_0jCUMktOHf8mz5v651zy1JALD6PgzobrGWDY/edit?usp=sharing"
+
+site_params <- googlesheets4::read_sheet(site_google_url, sheet = 1)
+site_avails <- googlesheets4::read_sheet(site_google_url, sheet = 2)
+sorted_sites <- site_avails %>%
+  filter(`data received` == "Y", is.na(excluded)) %>%
+  pull(siteid)
+
+# keep only sites in 'sorted_sites' list
+site_results <- site_results[sapply(site_results, function(x) any(sorted_sites %in% x))]
 ```
 
 ## Conduct Random-Effects Meta-Analysis
@@ -50,7 +65,7 @@ get_result_row <- function(df,
                            outcome = 'n_stay_reg_elix',
                            period = 'first_hosp_results',
                            neuro_type = 'cpns_results',
-                           neuro_chr = 'neuro_postBoth') {
+                           neuro_chr = 'neuro_postCentral') {
   # neuro_chr <- switch(neuro_type,
   #   cpns_results = 'neuro_postPeripheral',
   #   binary_results = 'neuro_postneuro_cond'
@@ -310,9 +325,8 @@ shapes[1] <- 18
 sizes <- rep(3.25, times = nrow(length_stay_results))
 sizes[1] <- 5
 
-# point_colors <- rep("black", times = nrow(length_stay_results))
-# point_colors[1] <- "blue"
-
+# min_est = min(length_stay_results$CI.Low, na.rm = TRUE)-2
+# max_est = max(length_stay_results$CI.Low, na.rm = TRUE)+2)
 
 forester(left_side_data = length_stay_results[1],
          estimate = length_stay_results$Estimate,
@@ -322,12 +336,12 @@ forester(left_side_data = length_stay_results[1],
          display = TRUE,
          font_family = "arial",
          arrows = TRUE, 
-         arrow_labels = c("Decreased Length", "Increased Length of Stay"),
-         xlim = c(-1,22),
-         xbreaks = c(-1, 0, 30),
+         arrow_labels = c("Decreased Days", "Increased Days"),
+         xlim = c(-2, 12),
+         xbreaks = c(0, 2, 4, 6, 8, 10, 12),
          point_sizes = sizes,
          point_shapes = shapes,
-         file_path = here::here("figures/Forest_plot_length_of_stay.png"))
+         file_path = here::here(paste0("figs/length_of_stay", meta_results[["n_stay_reg_elix"]][["data"]][["term"]][[1]],".png")))
 ```
 
 ### Readmission
@@ -356,7 +370,7 @@ forester(left_side_data = readmit_results[1],
          xbreaks = c(-1, 0, 1),
          point_sizes = sizes,
          point_shapes = shapes,
-         file_path = here::here("figures/Forest_plot_readmission.png"))
+         file_path = here::here(paste0("figs/readmission", meta_results[["n_stay_reg_elix"]][["data"]][["term"]][[1]],".png")))
 ```
 
 
@@ -383,10 +397,10 @@ forester(left_side_data = severe_results[1],
          arrows = TRUE, 
          arrow_labels = c("Decreased Risk", "Increased Risk"),
          xlim = c(-1,3),
-         xbreaks = c(-1, 0, 3),
+         xbreaks = c(-1, 0, 1, 2, 3),
          point_sizes = sizes,
          point_shapes = shapes,
-         file_path = here::here("figures/Forest_plot_severe.png"))
+         file_path = here::here(paste0("figs/severe", meta_results[["n_stay_reg_elix"]][["data"]][["term"]][[1]],".png")))
 ```
 
 ### Mortality
@@ -415,7 +429,7 @@ forester(left_side_data = death_results[1],
          xbreaks = c(-1, 0, 2),
          point_sizes = sizes,
          point_shapes = shapes,
-         file_path = here::here("figures/Forest_plot_death.png"))
+         file_path = here::here(paste0("figs/death", meta_results[["n_stay_reg_elix"]][["data"]][["term"]][[1]],".png")))
 ```
 
 ### Time to Severity
@@ -438,12 +452,12 @@ forester(left_side_data = severe_time_results[1],
          display = TRUE,
          font_family = "arial",
          arrows = TRUE, 
-         arrow_labels = c("Decreased Time", "Increased Time"),
-         xlim = c(-12.5,5.5),
-         xbreaks = c(-12.5, 0, 5.5),
+         arrow_labels = c("Decreased Days", "Increased Days"),
+         xlim = c(-18, 6),
+         xbreaks = c(-18, -12, -6, 0, 6),
          point_sizes = sizes,
          point_shapes = shapes,
-         file_path = here::here("figures/Forest_plot_severe_time.png"))
+         file_path = here::here(paste0("figs/time_to_severe", meta_results[["n_stay_reg_elix"]][["data"]][["term"]][[1]],".png")))
 ```
 
 ### Time to Death
@@ -466,12 +480,12 @@ forester(left_side_data = death_time_results[1],
          display = TRUE,
          font_family = "arial",
          arrows = TRUE, 
-         arrow_labels = c("Decreased Risk", "Increased Risk"),
-         xlim = c(-17,17),
-         xbreaks = c(-17, 0, 17),
+         arrow_labels = c("Decreased Days", "Increased Days"),
+         xlim = c(-18,18),
+         xbreaks = c(-18, -12, -6, 0, 6, 12, 18),
          point_sizes = sizes,
          point_shapes = shapes,
-         file_path = here::here("figures/Forest_plot_death_time.png"))
+         file_path = here::here(paste0("figs/time_to_death", meta_results[["n_stay_reg_elix"]][["data"]][["term"]][[1]],".png")))
 ```
 
 
@@ -495,12 +509,12 @@ forester(left_side_data = readmit_time_results[1],
          display = TRUE,
          font_family = "arial",
          arrows = TRUE, 
-         arrow_labels = c("Decreased Time", "Increased Time"),
-         xlim = c(-85,75),
-         xbreaks = c(-85, 0, 75),
+         arrow_labels = c("Decreased Days", "Increased Days"),
+         xlim = c(-60,26),
+         xbreaks = c(-60, 0, 26),
          point_sizes = sizes,
          point_shapes = shapes,
-         file_path = here::here("figures/Forest_plot_readmission_time.png"))
+         file_path = here::here(paste0("figs/admission_time", meta_results[["n_stay_reg_elix"]][["data"]][["term"]][[1]],".png")))
 ```
 
 ### Number of Readmissions
@@ -524,11 +538,11 @@ forester(left_side_data = readmit_n_results[1],
          font_family = "arial",
          arrows = TRUE, 
          arrow_labels = c("Decreased Readmissions", "Increased Readmissions"),
-         xlim = c(-1,1.5),
-         xbreaks = c(-1, 0, 1.5),
+         xlim = c(-0.5,1),
+         xbreaks = c(-0.5, 0, 1),
          point_sizes = sizes,
          point_shapes = shapes,
-         file_path = here::here("figures/Forest_plot_readmission_n.png"))
+         file_path = here::here(paste0("figs/readmission_n", meta_results[["n_stay_reg_elix"]][["data"]][["term"]][[1]],".png")))
 ```
 
 
