@@ -40,21 +40,30 @@ site_google_url <- "https://docs.google.com/spreadsheets/d/1epcYNd_0jCUMktOHf8mz
 
 site_params <- googlesheets4::read_sheet(site_google_url, sheet = 1)
 site_avails <- googlesheets4::read_sheet(site_google_url, sheet = 2)
+
 sorted_sites <- site_avails %>%
   filter(`data received` == "Y", is.na(excluded)) %>%
   pull(siteid)
+str(sorted_sites)
+
 
 # keep only sites in 'sorted_sites' list
 site_results <- site_results[sapply(site_results, function(x) any(sorted_sites %in% x))]
+
+## add results to site name
+sorted_sites <- paste(sorted_sites, "results", sep = "_")
 ```
 
 ## Conduct Random-Effects Meta-Analysis
 
 Here we conduct meta-analysis on outcomes occurring within the first hospital stay.
 
-**Note: Can run meta-analysis on effects of specific neuro_post type by setting changing ```neuro_chr``` in the get_result_row to ```neuro_postCentral```, ```neuro_postPeripheral``` or ```neuro_postBoth```**
+**Note: Can run meta-analysis on the effects of specific neuro_post type by setting ```neuro_chr_to_analyze``` to ```neuro_postCentral```, ```neuro_postPeripheral``` or ```neuro_postBoth```**
 
 ```{r}
+
+neuro_chr_to_analyze = 'neuro_postCentral'
+      
 get_site <- function(x){
   x$site
 }
@@ -65,7 +74,7 @@ get_result_row <- function(df,
                            outcome = 'n_stay_reg_elix',
                            period = 'first_hosp_results',
                            neuro_type = 'cpns_results',
-                           neuro_chr = 'neuro_postCentral') {
+                           neuro_chr = neuro_chr_to_analyze) {
   # neuro_chr <- switch(neuro_type,
   #   cpns_results = 'neuro_postPeripheral',
   #   binary_results = 'neuro_postneuro_cond'
@@ -88,6 +97,68 @@ outcomes <-
     "time_deceased_reg_elix",
     "time_readmit_reg_elix" 
   )
+
+# remove sites with < 5 in the 'neuro_chr' type of interest
+diag_table_list <- list()
+
+for (i in sorted_sites) {
+  tmp <- get(i)
+  tmp_diag <- tmp[[c(
+    "first_hosp_results",
+    "cpns_results",
+    "demo_table"
+  )]]
+  tmp_diag$site <- tmp[["site"]]
+  diag_table_list[[i]] <- tmp_diag %>%
+    filter(variable %in% c("sex.male",
+                         "sex.female")) %>% 
+                         #"readmitted.TRUE",
+                         #"Severity.Severe",
+                         #"Survival.Deceased")) %>% 
+    select(site, contains("n_var")) %>%
+    pivot_longer(cols = n_var_Peripheral:n_var_Both,
+                 names_to = "diagnosis",
+                 values_to = "count") %>% 
+    group_by(diagnosis, site) %>% 
+    mutate(sum = sum(count, na.rm = TRUE)) %>%
+    slice(1L) %>%
+    ungroup()
+}
+
+
+diag_table_wide <- bind_rows(diag_table_list)
+
+# sites to exclude
+if (nrow(diag_table_wide %>%
+  filter(sum < 5)) > 0 & neuro_chr_to_analyze == "neuro_postBoth") {
+  
+  exclude <- diag_table_wide %>%
+  filter(sum < 5) %>%
+    select(site)
+  
+  exclude <- exclude$site
+  
+  exclude <- paste(exclude, "results", sep = "_")
+  sorted_sites <- sorted_sites[!(sorted_sites %in% exclude)]
+}
+
+if (nrow(diag_table_wide %>%
+  filter(sum < 5)) > 0 & neuro_chr_to_analyze == "neuro_postPeripheral") {
+    
+  exclude <- diag_table_wide %>%
+  filter(sum < 5) %>%
+    select(site)
+  
+  exclude <- exclude$site
+  
+  exclude <- paste(exclude, "results", sep = "_")
+  sorted_sites <- sorted_sites[!(sorted_sites %in% exclude)]
+  
+  
+}
+
+sorted_sites <- gsub("_results", "", sorted_sites)
+site_results <- site_results[sapply(site_results, function(x) any(sorted_sites %in% x))]
 
 meta_results <- list()
 for (outcome_i in outcomes) {
@@ -139,13 +210,19 @@ for (i in names(meta_results)) {
   df <- cbind(analysis, studlab, TE, upper, lower, TE.random, lower.random, upper.random, Weight.random,
               pval.random, lower.predict, upper.predict, I2, lower.I2, upper.I2, H, lower.H, upper.H, 
               tau2, lower.tau2, upper.tau2)
+  
   ma_combine[[i]] <- df
 }
 
 combined_results <- do.call(rbind.data.frame, ma_combine)
 
+# if a binary outcome, convert estimates and CIs to OR
+# will also perform appropriate rounding and rename variables here
 combined_results <- combined_results %>%
   mutate_at(vars(TE:upper.tau2), ~ as.character(.) %>% as.numeric()) %>% 
+  mutate_at(vars(TE:upper.predict, -pval.random), ~ if_else(analysis == "readmit_reg_elix", exp(.),
+                                              if_else(analysis == "deceased_reg_elix", exp(.),
+                                                      if_else(analysis == "severe_reg_elix", exp(.), .)))) %>% 
   mutate_at(vars(TE:upper.tau2, -pval.random), ~ round(., 2)) %>%
   mutate(CI.random = paste("(", lower.random, ",", upper.random, ")")) %>%
   rename("Site" = studlab, 
@@ -304,7 +381,7 @@ results_table[results_table == "( NA , NA )"] <- ""
 results_table[is.na(results_table)] <- ""
 
 
-write.csv(results_table, file = paste0("meta_tables/meta_tables", meta_results[["n_stay_reg_elix"]][["data"]][["term"]][[1]], ".csv"), 
+write.csv(results_table, file = paste0("meta_tables/meta_tables", neuro_chr_to_analyze, ".csv"), 
           row.names = FALSE, )
 ```
 
@@ -325,8 +402,8 @@ shapes[1] <- 18
 sizes <- rep(3.25, times = nrow(length_stay_results))
 sizes[1] <- 5
 
-# min_est = min(length_stay_results$CI.Low, na.rm = TRUE)-2
-# max_est = max(length_stay_results$CI.Low, na.rm = TRUE)+2)
+min_est = min(length_stay_results$CI.Low, na.rm = TRUE)-2
+max_est = max(length_stay_results$CI.High, na.rm = TRUE)+2
 
 forester(left_side_data = length_stay_results[1],
          estimate = length_stay_results$Estimate,
@@ -337,42 +414,12 @@ forester(left_side_data = length_stay_results[1],
          font_family = "arial",
          arrows = TRUE, 
          arrow_labels = c("Decreased Days", "Increased Days"),
-         xlim = c(-2, 12),
-         xbreaks = c(0, 2, 4, 6, 8, 10, 12),
+         xlim = c(min_est, max_est),
+         xbreaks = c(min_est, 0, max_est),
          point_sizes = sizes,
          point_shapes = shapes,
-         file_path = here::here(paste0("figs/length_of_stay", meta_results[["n_stay_reg_elix"]][["data"]][["term"]][[1]],".png")))
+         file_path = here::here(paste0("figs/length_of_stay", neuro_chr_to_analyze,".png")))
 ```
-
-### Readmission
-
-```{r fig.width=8, message=FALSE, warning=FALSE}
-readmit_results <- combined_results %>% 
-  slice(grep(paste("Readmission", collapse="|"), row.names(.))) %>% 
-  filter(!grepl('Number|Time', row.names(.)))
-
-shapes <- rep(16, times = nrow(readmit_results))
-shapes[1] <- 18
-
-sizes <- rep(3.25, times = nrow(readmit_results))
-sizes[1] <- 5
-
-forester(left_side_data = readmit_results[1],
-         estimate = readmit_results$Estimate,
-         ci_low = readmit_results$CI.Low,
-         ci_high = readmit_results$CI.High,
-         right_side_data = readmit_results[,c("Estimate ", "P-value")],
-         display = TRUE,
-         font_family = "arial",
-         arrows = TRUE, 
-         arrow_labels = c("Decreased Risk", "Increased Risk"),
-         xlim = c(-1,1),
-         xbreaks = c(-1, 0, 1),
-         point_sizes = sizes,
-         point_shapes = shapes,
-         file_path = here::here(paste0("figs/readmission", meta_results[["n_stay_reg_elix"]][["data"]][["term"]][[1]],".png")))
-```
-
 
 ### Severe COVID-19 
 
@@ -387,6 +434,9 @@ shapes[1] <- 18
 sizes <- rep(3.25, times = nrow(severe_results))
 sizes[1] <- 5
 
+min_est = min(severe_results$CI.Low, na.rm = TRUE)-2
+max_est = max(severe_results$CI.High, na.rm = TRUE)+2
+
 forester(left_side_data = severe_results[1],
          estimate = severe_results$Estimate,
          ci_low = severe_results$CI.Low,
@@ -396,11 +446,11 @@ forester(left_side_data = severe_results[1],
          font_family = "arial",
          arrows = TRUE, 
          arrow_labels = c("Decreased Risk", "Increased Risk"),
-         xlim = c(-1,3),
-         xbreaks = c(-1, 0, 1, 2, 3),
+         xlim = c(min_est, max_est),
+         xbreaks = c(min_est, 0, max_est),
          point_sizes = sizes,
          point_shapes = shapes,
-         file_path = here::here(paste0("figs/severe", meta_results[["n_stay_reg_elix"]][["data"]][["term"]][[1]],".png")))
+         file_path = here::here(paste0("figs/severe", neuro_chr_to_analyze,".png")))
 ```
 
 ### Mortality
@@ -416,6 +466,9 @@ shapes[1] <- 18
 sizes <- rep(3.25, times = nrow(death_results))
 sizes[1] <- 5
 
+min_est = min(death_results$CI.Low, na.rm = TRUE)-2
+max_est = max(death_results$CI.High, na.rm = TRUE)+2
+
 forester(left_side_data = death_results[1],
          estimate = death_results$Estimate,
          ci_low = death_results$CI.Low,
@@ -425,12 +478,45 @@ forester(left_side_data = death_results[1],
          font_family = "arial",
          arrows = TRUE, 
          arrow_labels = c("Decreased Risk", "Increased Risk"),
-         xlim = c(-1,2),
-         xbreaks = c(-1, 0, 2),
+         xlim = c(min_est, max_est),
+         xbreaks = c(min_est, 0, max_est),
          point_sizes = sizes,
          point_shapes = shapes,
-         file_path = here::here(paste0("figs/death", meta_results[["n_stay_reg_elix"]][["data"]][["term"]][[1]],".png")))
+         file_path = here::here(paste0("figs/death", neuro_chr_to_analyze,".png")))
 ```
+
+### Readmission
+
+```{r fig.width=8, message=FALSE, warning=FALSE}
+readmit_results <- combined_results %>% 
+  slice(grep(paste("Readmission", collapse="|"), row.names(.))) %>% 
+  filter(!grepl('Number|Time', row.names(.)))
+
+shapes <- rep(16, times = nrow(readmit_results))
+shapes[1] <- 18
+
+sizes <- rep(3.25, times = nrow(readmit_results))
+sizes[1] <- 5
+
+min_est = min(readmit_results$CI.Low, na.rm = TRUE)-2
+max_est = max(readmit_results$CI.High, na.rm = TRUE)+2
+
+forester(left_side_data = readmit_results[1],
+         estimate = readmit_results$Estimate,
+         ci_low = readmit_results$CI.Low,
+         ci_high = readmit_results$CI.High,
+         right_side_data = readmit_results[,c("Estimate ", "P-value")],
+         display = TRUE,
+         font_family = "arial",
+         arrows = TRUE, 
+         arrow_labels = c("Decreased Risk", "Increased Risk"),
+         xlim = c(-1, 3),
+         xbreaks = c(-1, 0, 3),
+         point_sizes = sizes,
+         point_shapes = shapes,
+         file_path = here::here(paste0("figs/readmission", neuro_chr_to_analyze,".png")))
+```
+
 
 ### Time to Severity
 
@@ -444,6 +530,9 @@ shapes[1] <- 18
 sizes <- rep(3.25, times = nrow(severe_time_results))
 sizes[1] <- 5
 
+min_est = min(severe_time_results$CI.Low, na.rm = TRUE)-2
+max_est = max(severe_time_results$CI.High, na.rm = TRUE)+2
+
 forester(left_side_data = severe_time_results[1],
          estimate = severe_time_results$Estimate,
          ci_low = severe_time_results$CI.Low,
@@ -453,11 +542,11 @@ forester(left_side_data = severe_time_results[1],
          font_family = "arial",
          arrows = TRUE, 
          arrow_labels = c("Decreased Days", "Increased Days"),
-         xlim = c(-18, 6),
-         xbreaks = c(-18, -12, -6, 0, 6),
+         xlim = c(min_est, max_est),
+         xbreaks = c(min_est, 0, max_est),
          point_sizes = sizes,
          point_shapes = shapes,
-         file_path = here::here(paste0("figs/time_to_severe", meta_results[["n_stay_reg_elix"]][["data"]][["term"]][[1]],".png")))
+         file_path = here::here(paste0("figs/time_to_severe", neuro_chr_to_analyze,".png")))
 ```
 
 ### Time to Death
@@ -472,6 +561,9 @@ shapes[1] <- 18
 sizes <- rep(3.25, times = nrow(death_time_results))
 sizes[1] <- 5
 
+min_est = min(death_time_results$CI.Low, na.rm = TRUE)-2
+max_est = max(death_time_results$CI.High, na.rm = TRUE)+2
+
 forester(left_side_data = death_time_results[1],
          estimate = death_time_results$Estimate,
          ci_low = death_time_results$CI.Low,
@@ -481,11 +573,11 @@ forester(left_side_data = death_time_results[1],
          font_family = "arial",
          arrows = TRUE, 
          arrow_labels = c("Decreased Days", "Increased Days"),
-         xlim = c(-18,18),
-         xbreaks = c(-18, -12, -6, 0, 6, 12, 18),
+         xlim = c(min_est, max_est),
+         xbreaks = c(min_est, 0, max_est),
          point_sizes = sizes,
          point_shapes = shapes,
-         file_path = here::here(paste0("figs/time_to_death", meta_results[["n_stay_reg_elix"]][["data"]][["term"]][[1]],".png")))
+         file_path = here::here(paste0("figs/time_to_death", neuro_chr_to_analyze,".png")))
 ```
 
 
@@ -501,6 +593,9 @@ shapes[1] <- 18
 sizes <- rep(3.25, times = nrow(readmit_time_results))
 sizes[1] <- 5
 
+min_est = min(readmit_time_results$CI.Low, na.rm = TRUE)-2
+max_est = max(readmit_time_results$CI.High, na.rm = TRUE)+2
+
 forester(left_side_data = readmit_time_results[1],
          estimate = readmit_time_results$Estimate,
          ci_low = readmit_time_results$CI.Low,
@@ -510,11 +605,11 @@ forester(left_side_data = readmit_time_results[1],
          font_family = "arial",
          arrows = TRUE, 
          arrow_labels = c("Decreased Days", "Increased Days"),
-         xlim = c(-60,26),
-         xbreaks = c(-60, 0, 26),
+         xlim = c(min_est, max_est),
+         xbreaks = c(min_est, 0, max_est),
          point_sizes = sizes,
          point_shapes = shapes,
-         file_path = here::here(paste0("figs/admission_time", meta_results[["n_stay_reg_elix"]][["data"]][["term"]][[1]],".png")))
+         file_path = here::here(paste0("figs/admission_time", neuro_chr_to_analyze,".png")))
 ```
 
 ### Number of Readmissions
@@ -529,6 +624,9 @@ shapes[1] <- 18
 sizes <- rep(3.25, times = nrow(readmit_n_results))
 sizes[1] <- 5
 
+min_est = min(readmit_n_results$CI.Low, na.rm = TRUE)-1
+max_est = max(readmit_n_results$CI.High, na.rm = TRUE)+1
+
 forester(left_side_data = readmit_n_results[1],
          estimate = readmit_n_results$Estimate,
          ci_low = readmit_n_results$CI.Low,
@@ -538,11 +636,11 @@ forester(left_side_data = readmit_n_results[1],
          font_family = "arial",
          arrows = TRUE, 
          arrow_labels = c("Decreased Readmissions", "Increased Readmissions"),
-         xlim = c(-0.5,1),
-         xbreaks = c(-0.5, 0, 1),
+         xlim = c(min_est, max_est),
+         xbreaks = c(min_est, 0, max_est),
          point_sizes = sizes,
          point_shapes = shapes,
-         file_path = here::here(paste0("figs/readmission_n", meta_results[["n_stay_reg_elix"]][["data"]][["term"]][[1]],".png")))
+         file_path = here::here(paste0("figs/readmission_n", neuro_chr_to_analyze,".png")))
 ```
 
 
