@@ -160,6 +160,13 @@ if (nrow(diag_table_wide %>%
 sorted_sites <- gsub("_results", "", sorted_sites)
 site_results <- site_results[sapply(site_results, function(x) any(sorted_sites %in% x))]
 
+## need to remove specific sites from contributing to meta-analysis based on outcomes < 5
+
+# remove APHP for now
+exclude <- "APHP"
+sorted_sites <- sorted_sites[!(sorted_sites %in% exclude)]
+site_results <- site_results[sapply(site_results, function(x) any(sorted_sites %in% x))]
+
 meta_results <- list()
 for (outcome_i in outcomes) {
   meta_results[[outcome_i]] <-
@@ -375,7 +382,7 @@ results_table <- combined_results %>%
          H.CI = paste("(", lower.H, ",", upper.H, ")"),
          tau2.CI = paste("(", lower.tau2, ",", upper.tau2, ")")) %>%
   select(-lower.predict, -upper.predict, -lower.I2, -upper.I2, -lower.H, -upper.H, -lower.tau2, -upper.tau2) %>% 
-  select(Analysis, `Estimate `, Weight.random, p.value, Predict.CI, I2, I2.CI, H, H.CI, tau2, tau2.CI)
+  select(Analysis, `Estimate `, Weight.random, p.value, Predict.CI, I2, I2.CI, tau2, tau2.CI)
 
 results_table[results_table == "( NA , NA )"] <- ""
 results_table[is.na(results_table)] <- ""
@@ -446,8 +453,9 @@ forester(left_side_data = severe_results[1],
          font_family = "arial",
          arrows = TRUE, 
          arrow_labels = c("Decreased Risk", "Increased Risk"),
+         null_line_at = 1,
          xlim = c(min_est, max_est),
-         xbreaks = c(min_est, 0, max_est),
+         xbreaks = c(min_est, 1, max_est),
          point_sizes = sizes,
          point_shapes = shapes,
          file_path = here::here(paste0("figs/severe", neuro_chr_to_analyze,".png")))
@@ -478,8 +486,9 @@ forester(left_side_data = death_results[1],
          font_family = "arial",
          arrows = TRUE, 
          arrow_labels = c("Decreased Risk", "Increased Risk"),
+         null_line_at = 1,
          xlim = c(min_est, max_est),
-         xbreaks = c(min_est, 0, max_est),
+         xbreaks = c(min_est, 1, max_est),
          point_sizes = sizes,
          point_shapes = shapes,
          file_path = here::here(paste0("figs/death", neuro_chr_to_analyze,".png")))
@@ -510,8 +519,9 @@ forester(left_side_data = readmit_results[1],
          font_family = "arial",
          arrows = TRUE, 
          arrow_labels = c("Decreased Risk", "Increased Risk"),
-         xlim = c(-1, 3),
-         xbreaks = c(-1, 0, 3),
+         null_line_at = 1,
+         xlim = c(min_est, max_est),
+         xbreaks = c(min_est, 1, max_est),
          point_sizes = sizes,
          point_shapes = shapes,
          file_path = here::here(paste0("figs/readmission", neuro_chr_to_analyze,".png")))
@@ -624,8 +634,8 @@ shapes[1] <- 18
 sizes <- rep(3.25, times = nrow(readmit_n_results))
 sizes[1] <- 5
 
-min_est = min(readmit_n_results$CI.Low, na.rm = TRUE)-1
-max_est = max(readmit_n_results$CI.High, na.rm = TRUE)+1
+min_est = min(readmit_n_results$CI.Low, na.rm = TRUE)-0.5
+max_est = max(readmit_n_results$CI.High, na.rm = TRUE)+0.5
 
 forester(left_side_data = readmit_n_results[1],
          estimate = readmit_n_results$Estimate,
