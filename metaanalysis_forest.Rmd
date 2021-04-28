@@ -1,5 +1,5 @@
 ---
-title: "Meta-Analysis-[Neuro-Cat-Type]"
+title: "Meta-Analysis-Peripheral"
 output: html_document
 ---
 
@@ -62,7 +62,7 @@ Here we conduct meta-analysis on outcomes occurring within the first hospital st
 
 ```{r}
 
-neuro_chr_to_analyze = 'neuro_postBoth'
+neuro_chr_to_analyze = 'neuro_postPeripheral'
       
 get_site <- function(x){
   x$site
@@ -98,69 +98,9 @@ outcomes <-
     "time_readmit_reg_elix" 
   )
 
-# remove sites with < 5 in the 'neuro_chr' type of interest
-diag_table_list <- list()
-
-for (i in sorted_sites) {
-  tmp <- get(i)
-  tmp_diag <- tmp[[c(
-    "first_hosp_results",
-    "cpns_results",
-    "demo_table"
-  )]]
-  tmp_diag$site <- tmp[["site"]]
-  diag_table_list[[i]] <- tmp_diag %>%
-    filter(variable %in% c("sex.male",
-                         "sex.female")) %>%
-    select(site, contains("n_var")) %>%
-    pivot_longer(cols = n_var_Peripheral:n_var_Both,
-                 names_to = "diagnosis",
-                 values_to = "count") %>% 
-    group_by(diagnosis, site) %>% 
-    mutate(sum = sum(count, na.rm = TRUE)) %>%
-    slice(1L) %>%
-    ungroup()
-}
-
-
-diag_table_wide <- bind_rows(diag_table_list)
-
-# sites to exclude
-if (nrow(diag_table_wide %>%
-  filter(sum < 5)) > 0 & neuro_chr_to_analyze == "neuro_postBoth") {
-  
-  exclude <- diag_table_wide %>%
-  filter(sum < 5) %>%
-    select(site)
-  
-  exclude <- exclude$site
-  
-  exclude <- paste(exclude, "results", sep = "_")
-  sorted_sites <- sorted_sites[!(sorted_sites %in% exclude)]
-}
-
-if (nrow(diag_table_wide %>%
-  filter(sum < 5)) > 0 & neuro_chr_to_analyze == "neuro_postPeripheral") {
-    
-  exclude <- diag_table_wide %>%
-  filter(sum < 5) %>%
-    select(site)
-  
-  exclude <- exclude$site
-  
-  exclude <- paste(exclude, "results", sep = "_")
-  sorted_sites <- sorted_sites[!(sorted_sites %in% exclude)]
-  
-  
-}
-
-sorted_sites <- gsub("_results", "", sorted_sites)
-site_results <- site_results[sapply(site_results, function(x) any(sorted_sites %in% x))]
-
-## need to remove specific sites from contributing to meta-analysis based on outcomes < 5
-
 # remove APHP for now
 exclude <- "APHP"
+sorted_sites <- gsub("_results", "", sorted_sites)
 sorted_sites <- sorted_sites[!(sorted_sites %in% exclude)]
 site_results <- site_results[sapply(site_results, function(x) any(sorted_sites %in% x))]
 
