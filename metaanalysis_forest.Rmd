@@ -1,5 +1,5 @@
 ---
-title: "Meta-Analysis"
+title: "Meta-Analysis-[Neuro-Cat-Type]"
 output: html_document
 ---
 
@@ -62,7 +62,7 @@ Here we conduct meta-analysis on outcomes occurring within the first hospital st
 
 ```{r}
 
-neuro_chr_to_analyze = 'neuro_postCentral'
+neuro_chr_to_analyze = 'neuro_postBoth'
       
 get_site <- function(x){
   x$site
@@ -111,10 +111,7 @@ for (i in sorted_sites) {
   tmp_diag$site <- tmp[["site"]]
   diag_table_list[[i]] <- tmp_diag %>%
     filter(variable %in% c("sex.male",
-                         "sex.female")) %>% 
-                         #"readmitted.TRUE",
-                         #"Severity.Severe",
-                         #"Survival.Deceased")) %>% 
+                         "sex.female")) %>%
     select(site, contains("n_var")) %>%
     pivot_longer(cols = n_var_Peripheral:n_var_Both,
                  names_to = "diagnosis",
@@ -227,7 +224,7 @@ combined_results <- do.call(rbind.data.frame, ma_combine)
 # will also perform appropriate rounding and rename variables here
 combined_results <- combined_results %>%
   mutate_at(vars(TE:upper.tau2), ~ as.character(.) %>% as.numeric()) %>% 
-  mutate_at(vars(TE:upper.predict, -pval.random), ~ if_else(analysis == "readmit_reg_elix", exp(.),
+  mutate_at(vars(TE:upper.predict, -pval.random, -Weight.random), ~ if_else(analysis == "readmit_reg_elix", exp(.),
                                               if_else(analysis == "deceased_reg_elix", exp(.),
                                                       if_else(analysis == "severe_reg_elix", exp(.), .)))) %>% 
   mutate_at(vars(TE:upper.tau2, -pval.random), ~ round(., 2)) %>%
@@ -412,6 +409,11 @@ sizes[1] <- 5
 min_est = min(length_stay_results$CI.Low, na.rm = TRUE)-2
 max_est = max(length_stay_results$CI.High, na.rm = TRUE)+2
 
+if (neuro_chr_to_analyze == 'neuro_postBoth') { 
+  min_est = 0
+  
+  }
+
 forester(left_side_data = length_stay_results[1],
          estimate = length_stay_results$Estimate,
          ci_low = length_stay_results$CI.Low,
@@ -475,7 +477,17 @@ sizes <- rep(3.25, times = nrow(death_results))
 sizes[1] <- 5
 
 min_est = min(death_results$CI.Low, na.rm = TRUE)-2
-max_est = max(death_results$CI.High, na.rm = TRUE)+2
+max_est = max(death_results$CI.High, na.rm = TRUE)+2 
+
+if (neuro_chr_to_analyze == 'neuro_postPeripheral') { 
+  max_est = 4
+  
+}
+
+if (neuro_chr_to_analyze == 'neuro_postBoth') { 
+  max_est = 10
+  
+  }
 
 forester(left_side_data = death_results[1],
          estimate = death_results$Estimate,
@@ -509,6 +521,11 @@ sizes[1] <- 5
 
 min_est = min(readmit_results$CI.Low, na.rm = TRUE)-2
 max_est = max(readmit_results$CI.High, na.rm = TRUE)+2
+
+if (neuro_chr_to_analyze == 'neuro_postBoth') { 
+  max_est = 12
+  
+  }
 
 forester(left_side_data = readmit_results[1],
          estimate = readmit_results$Estimate,
