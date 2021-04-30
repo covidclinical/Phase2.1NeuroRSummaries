@@ -821,7 +821,6 @@ readmit_plot <- ggplot(
   )
 ) +
   geom_bar(stat = "identity", position = "dodge") +
-  # coord_flip() +
   scale_fill_viridis_d() +
   # rcartocolor::scale_fill_carto_d() +
   facet_grid(Dx ~ Demo_var_i, scale = "free_y") +
