@@ -383,16 +383,34 @@ combined_table <- combined_table_wide %>%
 ### Diagnoses
 
 ```{r}
-load("public-data/neuro_icds_10.rda")
-load("public-data/neuro_icds_9.rda")
-
-neuro_icds_10 <- neuro_icds_10 %>%
+neuro_icds_10 <-
+  readxl::read_excel("public-data/2020-02-22_neuro-icd10_CNSvPNS.xlsx") %>%
+  rename(
+    "icd" = `ICD-10`,
+    "pns_cns" = `Nervous system Involvement (1=central, 2=peripheral)`
+  ) %>%
+  mutate(pns_cns = as.factor(pns_cns) %>% fct_recode(
+    Central = "1",
+    Peripheral = "2"
+  )) %>%
   select(icd, `Neurological Disease Category`, pns_cns, `ICD-10 Description`) %>%
   rename("description" = `ICD-10 Description`) %>%
   mutate(concept_type = "icd-10")
 
-neuro_icds_9 <- neuro_icds_9 %>%
-  select(icd, `Neurological Disease Category`, pns_cns, icd_description) %>% 
+neuro_icds_9 <- read.csv("public-data/icd9_tab_CNSvPNS.csv") %>%
+  rename(
+    "Neurological Disease Category" = "Neurological.Disease.Category",
+    "pns_cns" = `Nervous.system.Involvement..1.central..2.peripheral.`,
+    "icd_description" = `icd9_desc`
+  ) %>%
+  mutate(
+    pns_cns = as.factor(pns_cns) %>% fct_recode(
+      Central = "1",
+      Peripheral = "2"
+    ),
+    concept_type = "DIAG-ICD9"
+  ) %>%
+  select(icd, `Neurological Disease Category`, pns_cns, icd_description) %>%
   rename("description" = icd_description) %>%
   mutate(concept_type = "icd-9")
 
@@ -409,7 +427,7 @@ for (i in results) {
   )]]
   tmp_diag$site <- tmp[["site"]]
   diag_table_list[[i]] <- tmp_diag %>%
-    filter(variable == "sex.female" | variable == "sex.male") %>% 
+    filter(variable == "sex.female" | variable == "sex.male") %>%
     select(site, contains("n_var"))
 }
 
@@ -419,12 +437,12 @@ diag_table_wide <- bind_rows(diag_table_list)
 diag_counts <- colSums(Filter(is.numeric, diag_table_wide), na.rm = TRUE) %>% data.frame()
 
 diag_counts <- tibble::rownames_to_column(diag_counts, "icd") %>%
-  mutate(icd = gsub("n_var_", "", icd)) %>% 
-  rename("sum" = '.') %>%
+  mutate(icd = gsub("n_var_", "", icd)) %>%
+  rename("sum" = ".") %>%
   left_join(., icds, by = "icd") %>%
-  group_by(`Neurological Disease Category`) %>% 
-  mutate(sum_neuro_cat = sum(sum)) %>% 
-  arrange(desc(sum_neuro_cat)) 
+  group_by(`Neurological Disease Category`) %>%
+  mutate(sum_neuro_cat = sum(sum)) %>%
+  arrange(desc(sum_neuro_cat))
 
 datatable(diag_counts)
 ```
@@ -446,15 +464,17 @@ for (i in results) {
     select(site, Comorbidity, n_Total)
 }
 comorb_table_wide <- bind_rows(comorb_table_list) %>%
-  pivot_wider(id_cols = "site",
-              names_from = "Comorbidity", 
-              values_from = "n_Total")
+  pivot_wider(
+    id_cols = "site",
+    names_from = "Comorbidity",
+    values_from = "n_Total"
+  )
 
-comorb_counts <- colSums(Filter(is.numeric, comorb_table_wide), na.rm = TRUE) %>% 
+comorb_counts <- colSums(Filter(is.numeric, comorb_table_wide), na.rm = TRUE) %>%
   data.frame()
 
 comorb_counts <- tibble::rownames_to_column(comorb_counts, "Comorbidity") %>%
-  rename("total" = '.') %>%
+  rename("total" = ".") %>%
   arrange(desc(total))
 
 datatable(comorb_counts)
@@ -690,7 +710,8 @@ age_plot2 <- age_sum %>%
   scale_fill_manual(values = cc) +
   scale_x_continuous(
     breaks = my_breaks,
-    labels = scales::percent_format(accuracy = 1)) +
+    labels = scales::percent_format(accuracy = 1)
+  ) +
   labs(x = "Age group proportion", y = NULL, fill = NULL) +
   guides(fill = guide_legend(nrow = 1, reverse = TRUE)) +
   coord_cartesian(expand = FALSE) +
@@ -702,7 +723,7 @@ age_plot2 <- age_sum %>%
     panel.grid = element_blank(),
     legend.key.height = unit(3, "mm"),
     panel.spacing = unit(0, "lines")
-  )  +
+  ) +
   NULL
 age_plot2
 ```
