@@ -1,5 +1,5 @@
 ---
-title: "Meta-Analysis-Peripheral"
+title: "Meta-Analysis"
 output: html_document
 ---
 
@@ -42,10 +42,9 @@ site_params <- googlesheets4::read_sheet(site_google_url, sheet = 1)
 site_avails <- googlesheets4::read_sheet(site_google_url, sheet = 2)
 
 sorted_sites <- site_avails %>%
-  filter(`data received` == "Y", is.na(excluded)) %>%
+  filter(`data received` == "Y") %>% #, is.na(excluded)) %>%
   pull(siteid)
 str(sorted_sites)
-
 
 # keep only sites in 'sorted_sites' list
 site_results <- site_results[sapply(site_results, function(x) any(sorted_sites %in% x))]
@@ -62,7 +61,7 @@ Here we conduct meta-analysis on outcomes occurring within the first hospital st
 
 ```{r}
 
-neuro_chr_to_analyze = 'neuro_postPeripheral'
+neuro_chr_to_analyze = 'neuro_postBoth'
       
 get_site <- function(x){
   x$site
@@ -98,8 +97,8 @@ outcomes <-
     "time_readmit_reg_elix" 
   )
 
-# remove APHP for now
-exclude <- "APHP"
+# remove APHP, H120 for now
+exclude <- c("APHP", "H12O")
 sorted_sites <- gsub("_results", "", sorted_sites)
 sorted_sites <- sorted_sites[!(sorted_sites %in% exclude)]
 site_results <- site_results[sapply(site_results, function(x) any(sorted_sites %in% x))]
@@ -117,13 +116,13 @@ for (outcome_i in outcomes) {
       sm = 'MD',
       comb.random = TRUE,
       comb.fixed = FALSE,
-      method.tau = "DL", # default tau method
+      method.tau = "DL", #default tau method
       hakn = FALSE,
       prediction=TRUE,
       studlab = site
       
     )
-}
+  }
 ```
 
 ```{r}
@@ -325,12 +324,39 @@ results_table[results_table == "( NA , NA )"] <- ""
 results_table[is.na(results_table)] <- ""
 
 
-write.csv(results_table, file = paste0("meta_tables/meta_tables", neuro_chr_to_analyze, ".csv"), 
+write.csv(results_table, file = paste0("meta_tables/meta_tables_NUH_ICSM_include_", neuro_chr_to_analyze, ".csv"), 
           row.names = FALSE, )
 ```
 
-
 ## Results
+
+Define a vector of invalid sites. As of now, ICSM and NUH, have such low counts that CIs and estimates are very high/low. To standardize the plots, we will want to abstract the min/max values while excluding any outlier sites like ICSM and NUH
+
+```{r}
+invalid_sites <- sorted_sites[sorted_sites %in% c("NUH", "ICSM")]
+
+# indent the sites to facilitate mapping with our combined_results df
+invalid_sites <- paste0("   ", invalid_sites)
+```
+
+create a scale function to identify the min and max CI for each site, excluding sites with values of 'Inf' or our invalid sites
+
+```{r}
+scale_plot <- function(combined_results_df) {
+  
+  scale <- combined_results_df %>% 
+  filter(!Analysis %in% invalid_sites,
+         !CI.Low == "Inf",
+         !CI.High == "Inf") %>% 
+  mutate(min_est = min(CI.Low, na.rm = TRUE)-1,
+         max_est = max(CI.High, na.rm = TRUE)+1) %>% 
+  distinct(min_est, max_est)
+  
+  return(scale)
+  
+}
+```
+
 
 ### Length of Stay
 
@@ -346,13 +372,7 @@ shapes[1] <- 18
 sizes <- rep(3.25, times = nrow(length_stay_results))
 sizes[1] <- 5
 
-min_est = min(length_stay_results$CI.Low, na.rm = TRUE)-2
-max_est = max(length_stay_results$CI.High, na.rm = TRUE)+2
-
-if (neuro_chr_to_analyze == 'neuro_postBoth') { 
-  min_est = 0
-  
-  }
+scale <- scale_plot(length_stay_results)
 
 forester(left_side_data = length_stay_results[1],
          estimate = length_stay_results$Estimate,
@@ -363,8 +383,8 @@ forester(left_side_data = length_stay_results[1],
          font_family = "arial",
          arrows = TRUE, 
          arrow_labels = c("Decreased Days", "Increased Days"),
-         xlim = c(min_est, max_est),
-         xbreaks = c(min_est, 0, max_est),
+         xlim = c(scale$min_est, scale$max_est),
+         xbreaks = c(scale$min_est, 0, scale$max_est),
          point_sizes = sizes,
          point_shapes = shapes,
          file_path = here::here(paste0("figs/length_of_stay", neuro_chr_to_analyze,".png")))
@@ -383,8 +403,7 @@ shapes[1] <- 18
 sizes <- rep(3.25, times = nrow(severe_results))
 sizes[1] <- 5
 
-min_est = min(severe_results$CI.Low, na.rm = TRUE)-2
-max_est = max(severe_results$CI.High, na.rm = TRUE)+2
+scale <- scale_plot(severe_results)
 
 forester(left_side_data = severe_results[1],
          estimate = severe_results$Estimate,
@@ -396,8 +415,8 @@ forester(left_side_data = severe_results[1],
          arrows = TRUE, 
          arrow_labels = c("Decreased Risk", "Increased Risk"),
          null_line_at = 1,
-         xlim = c(min_est, max_est),
-         xbreaks = c(min_est, 1, max_est),
+         xlim = c(scale$min_est, scale$max_est),
+         xbreaks = c(scale$min_est, 1, scale$max_est),
          point_sizes = sizes,
          point_shapes = shapes,
          file_path = here::here(paste0("figs/severe", neuro_chr_to_analyze,".png")))
@@ -416,18 +435,7 @@ shapes[1] <- 18
 sizes <- rep(3.25, times = nrow(death_results))
 sizes[1] <- 5
 
-min_est = min(death_results$CI.Low, na.rm = TRUE)-2
-max_est = max(death_results$CI.High, na.rm = TRUE)+2 
-
-if (neuro_chr_to_analyze == 'neuro_postPeripheral') { 
-  max_est = 4
-  
-}
-
-if (neuro_chr_to_analyze == 'neuro_postBoth') { 
-  max_est = 10
-  
-  }
+scale <- scale_plot(death_results)
 
 forester(left_side_data = death_results[1],
          estimate = death_results$Estimate,
@@ -439,8 +447,8 @@ forester(left_side_data = death_results[1],
          arrows = TRUE, 
          arrow_labels = c("Decreased Risk", "Increased Risk"),
          null_line_at = 1,
-         xlim = c(min_est, max_est),
-         xbreaks = c(min_est, 1, max_est),
+         xlim = c(scale$min_est, scale$max_est),
+         xbreaks = c(scale$min_est, 1, scale$max_est),
          point_sizes = sizes,
          point_shapes = shapes,
          file_path = here::here(paste0("figs/death", neuro_chr_to_analyze,".png")))
@@ -459,13 +467,7 @@ shapes[1] <- 18
 sizes <- rep(3.25, times = nrow(readmit_results))
 sizes[1] <- 5
 
-min_est = min(readmit_results$CI.Low, na.rm = TRUE)-2
-max_est = max(readmit_results$CI.High, na.rm = TRUE)+2
-
-if (neuro_chr_to_analyze == 'neuro_postBoth') { 
-  max_est = 12
-  
-  }
+scale <- scale_plot(readmit_results)
 
 forester(left_side_data = readmit_results[1],
          estimate = readmit_results$Estimate,
@@ -477,8 +479,8 @@ forester(left_side_data = readmit_results[1],
          arrows = TRUE, 
          arrow_labels = c("Decreased Risk", "Increased Risk"),
          null_line_at = 1,
-         xlim = c(min_est, max_est),
-         xbreaks = c(min_est, 1, max_est),
+         xlim = c(scale$min_est, scale$max_est),
+         xbreaks = c(scale$min_est, 1, scale$max_est),
          point_sizes = sizes,
          point_shapes = shapes,
          file_path = here::here(paste0("figs/readmission", neuro_chr_to_analyze,".png")))
@@ -497,8 +499,7 @@ shapes[1] <- 18
 sizes <- rep(3.25, times = nrow(severe_time_results))
 sizes[1] <- 5
 
-min_est = min(severe_time_results$CI.Low, na.rm = TRUE)-2
-max_est = max(severe_time_results$CI.High, na.rm = TRUE)+2
+scale <- scale_plot(severe_time_results)
 
 forester(left_side_data = severe_time_results[1],
          estimate = severe_time_results$Estimate,
@@ -509,8 +510,8 @@ forester(left_side_data = severe_time_results[1],
          font_family = "arial",
          arrows = TRUE, 
          arrow_labels = c("Decreased Days", "Increased Days"),
-         xlim = c(min_est, max_est),
-         xbreaks = c(min_est, 0, max_est),
+         xlim = c(scale$min_est, scale$max_est),
+         xbreaks = c(scale$min_est, 0, scale$max_est),
          point_sizes = sizes,
          point_shapes = shapes,
          file_path = here::here(paste0("figs/time_to_severe", neuro_chr_to_analyze,".png")))
@@ -528,8 +529,7 @@ shapes[1] <- 18
 sizes <- rep(3.25, times = nrow(death_time_results))
 sizes[1] <- 5
 
-min_est = min(death_time_results$CI.Low, na.rm = TRUE)-2
-max_est = max(death_time_results$CI.High, na.rm = TRUE)+2
+scale <- scale_plot(death_time_results)
 
 forester(left_side_data = death_time_results[1],
          estimate = death_time_results$Estimate,
@@ -540,8 +540,8 @@ forester(left_side_data = death_time_results[1],
          font_family = "arial",
          arrows = TRUE, 
          arrow_labels = c("Decreased Days", "Increased Days"),
-         xlim = c(min_est, max_est),
-         xbreaks = c(min_est, 0, max_est),
+         xlim = c(scale$min_est, scale$max_est),
+         xbreaks = c(scale$min_est, 0, scale$max_est),
          point_sizes = sizes,
          point_shapes = shapes,
          file_path = here::here(paste0("figs/time_to_death", neuro_chr_to_analyze,".png")))
@@ -560,8 +560,7 @@ shapes[1] <- 18
 sizes <- rep(3.25, times = nrow(readmit_time_results))
 sizes[1] <- 5
 
-min_est = min(readmit_time_results$CI.Low, na.rm = TRUE)-2
-max_est = max(readmit_time_results$CI.High, na.rm = TRUE)+2
+scale <- scale_plot(readmit_time_results)
 
 forester(left_side_data = readmit_time_results[1],
          estimate = readmit_time_results$Estimate,
@@ -572,8 +571,8 @@ forester(left_side_data = readmit_time_results[1],
          font_family = "arial",
          arrows = TRUE, 
          arrow_labels = c("Decreased Days", "Increased Days"),
-         xlim = c(min_est, max_est),
-         xbreaks = c(min_est, 0, max_est),
+         xlim = c(scale$min_est, scale$max_est),
+         xbreaks = c(scale$min_est, 0, scale$max_est),
          point_sizes = sizes,
          point_shapes = shapes,
          file_path = here::here(paste0("figs/admission_time", neuro_chr_to_analyze,".png")))
@@ -591,8 +590,7 @@ shapes[1] <- 18
 sizes <- rep(3.25, times = nrow(readmit_n_results))
 sizes[1] <- 5
 
-min_est = min(readmit_n_results$CI.Low, na.rm = TRUE)-0.5
-max_est = max(readmit_n_results$CI.High, na.rm = TRUE)+0.5
+scale <- scale_plot(readmit_n_results)
 
 forester(left_side_data = readmit_n_results[1],
          estimate = readmit_n_results$Estimate,
@@ -603,8 +601,8 @@ forester(left_side_data = readmit_n_results[1],
          font_family = "arial",
          arrows = TRUE, 
          arrow_labels = c("Decreased Readmissions", "Increased Readmissions"),
-         xlim = c(min_est, max_est),
-         xbreaks = c(min_est, 0, max_est),
+         xlim = c(scale$min_est, scale$max_est),
+         xbreaks = c(scale$min_est, 0, scale$max_est),
          point_sizes = sizes,
          point_shapes = shapes,
          file_path = here::here(paste0("figs/readmission_n", neuro_chr_to_analyze,".png")))
