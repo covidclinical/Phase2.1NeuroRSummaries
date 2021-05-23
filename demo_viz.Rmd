@@ -434,15 +434,20 @@ for (i in results) {
 diag_table_wide <- bind_rows(diag_table_list)
 
 
-diag_counts <- colSums(Filter(is.numeric, diag_table_wide), na.rm = TRUE) %>% data.frame()
+diag_counts <- colSums(Filter(is.numeric, diag_table_wide), na.rm = TRUE) %>% 
+  data.frame()
 
 diag_counts <- tibble::rownames_to_column(diag_counts, "icd") %>%
   mutate(icd = gsub("n_var_", "", icd)) %>%
-  rename("sum" = ".") %>%
+  rename("sum_neuro_icd" = ".") %>%
   left_join(., icds, by = "icd") %>%
   group_by(`Neurological Disease Category`) %>%
-  mutate(sum_neuro_cat = sum(sum)) %>%
-  arrange(desc(sum_neuro_cat))
+  mutate(sum_neuro_cat = sum(sum_neuro_icd)) %>%
+  arrange(desc(sum_neuro_cat)) %>% 
+  ungroup() %>% 
+  select(icd, `Neurological Disease Category`, 
+         pns_cns, description, concept_type, sum_neuro_icd,
+         sum_neuro_cat)
 
 datatable(diag_counts)
 ```
@@ -729,7 +734,7 @@ age_plot2
 ```
 
 
-```{r combine-plots, fig.height=7, fig.width=9}
+```{r combine-plots, eval=FALSE, fig.height=7, fig.width=9, include=FALSE}
 demo_plot <- cowplot::plot_grid(gender_plot, age_plot, race_plot,
   ncol = 1,
   rel_heights = c(1, 1.1, 0.95)
