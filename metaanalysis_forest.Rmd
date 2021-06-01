@@ -53,24 +53,20 @@ site_results <- site_results[sapply(site_results, function(x) any(sorted_sites %
 sorted_sites <- paste(sorted_sites, "results", sep = "_")
 ```
 
-## Calculate relative risk 
-
-We will calculate relative risk and confidence intervals for binary outcomes 
-
-```{r}
-set.seed(1045)
-```
-
-
 ## Conduct Random-Effects Meta-Analysis
 
 Here we conduct meta-analysis on outcomes occurring within the first hospital stay.
 
 **Note: Can run meta-analysis on the effects of specific neuro_post type by setting ```neuro_chr_to_analyze``` to ```neuro_postCentral```, ```neuro_postPeripheral``` or ```neuro_postBoth```**
 
+**Also, ensure that we define correct params under ```get_result_row```
+
 ```{r}
 
 neuro_chr_to_analyze = 'neuro_postCentral'
+
+# binary results
+#neuro_chr_to_analyze = 'neuro_postneuro_cond'
       
 get_site <- function(x){
   x$site
@@ -82,6 +78,8 @@ get_result_row <- function(df,
                            outcome = 'n_stay_reg_elix',
                            period = 'first_hosp_results',
                            neuro_type = 'cpns_results',
+                           #period = 'all_hosp_results',
+                           #neuro_type = 'binary_results',
                            neuro_chr = neuro_chr_to_analyze) {
   # neuro_chr <- switch(neuro_type,
   #   cpns_results = 'neuro_postPeripheral',
