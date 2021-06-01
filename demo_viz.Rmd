@@ -36,7 +36,7 @@ site_google_url <- "https://docs.google.com/spreadsheets/d/1epcYNd_0jCUMktOHf8mz
 site_params <- googlesheets4::read_sheet(site_google_url, sheet = 1)
 site_avails <- googlesheets4::read_sheet(site_google_url, sheet = 2)
 sorted_sites <- site_avails %>%
-  filter(`data received` == "Y", is.na(excluded)) %>%
+  filter(`data received` == "Y") %>% #, is.na(excluded)) %>%
   pull(siteid)
 
 # sorted_sites <- rev(c(
@@ -468,21 +468,15 @@ for (i in results) {
   comorb_table_list[[i]] <- tmp_comorb %>%
     select(site, Comorbidity, n_Total)
 }
-comorb_table_wide <- bind_rows(comorb_table_list) %>%
-  pivot_wider(
-    id_cols = "site",
-    names_from = "Comorbidity",
-    values_from = "n_Total"
-  )
+comorb_table_wide <- bind_rows(comorb_table_list) %>% 
+  data.frame() %>% 
+  group_by(Comorbidity) %>% 
+  mutate(Comorb_Total = sum(n_Total, na.rm = TRUE),
+         Comorb_Perc = round(Comorb_Total/as.numeric(tableOne_compiled[1,2])*100, 1)) %>% 
+  distinct(Comorbidity, Comorb_Total, Comorb_Perc)
 
-comorb_counts <- colSums(Filter(is.numeric, comorb_table_wide), na.rm = TRUE) %>%
-  data.frame()
 
-comorb_counts <- tibble::rownames_to_column(comorb_counts, "Comorbidity") %>%
-  rename("total" = ".") %>%
-  arrange(desc(total))
-
-datatable(comorb_counts)
+datatable(comorb_table_wide)
 ```
 
 
@@ -734,7 +728,7 @@ age_plot2
 ```
 
 
-```{r combine-plots, eval=FALSE, fig.height=7, fig.width=9, include=FALSE}
+```{r combine-plots fig.height=7, fig.width=9}
 demo_plot <- cowplot::plot_grid(gender_plot, age_plot, race_plot,
   ncol = 1,
   rel_heights = c(1, 1.1, 0.95)

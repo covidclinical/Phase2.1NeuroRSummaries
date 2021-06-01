@@ -53,6 +53,15 @@ site_results <- site_results[sapply(site_results, function(x) any(sorted_sites %
 sorted_sites <- paste(sorted_sites, "results", sep = "_")
 ```
 
+## Calculate relative risk 
+
+We will calculate relative risk and confidence intervals for binary outcomes 
+
+```{r}
+set.seed(1045)
+```
+
+
 ## Conduct Random-Effects Meta-Analysis
 
 Here we conduct meta-analysis on outcomes occurring within the first hospital stay.
@@ -61,7 +70,7 @@ Here we conduct meta-analysis on outcomes occurring within the first hospital st
 
 ```{r}
 
-neuro_chr_to_analyze = 'neuro_postBoth'
+neuro_chr_to_analyze = 'neuro_postCentral'
       
 get_site <- function(x){
   x$site
