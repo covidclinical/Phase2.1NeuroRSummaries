@@ -47,7 +47,7 @@ site_results <- site_results[sorted_sites]
 
 neuro_chr_to_analyze <- "neuro_postCentral"
 
-get_result_row <- function(df,
+get_life_row <- function(df,
                            outcome = "time_severe_reg_elix",
                            period = "first_hosp_results",
                            neuro_type = "cpns_results") {
@@ -59,6 +59,24 @@ get_result_row <- function(df,
     )
 }
 
+# df = site_results[[1]]
+get_cox_row <- function(df,
+                        outcome = "time_severe_reg_elix",
+                        period = "first_hosp_results",
+                        neuro_type = "cpns_results") {
+  cox_output <- df[[c(period, neuro_type, outcome, "cox")]]
+  coefficients(cox_output) %>%
+    data.frame() %>% 
+    mutate(
+      site = df$site,
+      n_site = cox_output$n
+    ) %>% 
+    rownames_to_column("variable")
+}
+```
+
+
+```{r}
 outcomes <-
   c(
     "time_severe_reg_elix",
@@ -71,7 +89,7 @@ meta_results <- list()
 for (outcome_i in outcomes) {
   meta_results[[outcome_i]] <-
     site_results %>%
-    lapply(get_result_row, outcome = outcome_i) %>%
+    lapply(get_life_row, outcome = outcome_i) %>%
     bind_rows() %>%
     mutate(outcome = outcome_i)
 }
@@ -195,3 +213,22 @@ res_dat %>%
   theme_classic() +
   theme(plot.margin = margin(2, 50, 2, 2))
 ```
+
+## Cox model
+
+```{r}
+cox_results <- list()
+
+for (outcome_i in outcomes) {
+  cox_results[[outcome_i]] <-
+    site_results %>%
+    lapply(get_cox_row, outcome = outcome_i) %>%
+    bind_rows() %>%
+    mutate(outcome = outcome_i)
+}
+
+cox_results$time_deceased_reg_elix %>% 
+  filter(variable == "neuro_postCentral") %>% 
+  with(rma(yi = coef, sei = se.coef., method = "DL"))
+```
+
