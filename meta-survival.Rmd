@@ -1,0 +1,197 @@
+---
+title: "Metaanalysis of survival"
+output: html_document
+---
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(metafor)
+```
+
+```{r}
+rdas <- list.files(
+  path = "results",
+  pattern = ".rda",
+  full.names = TRUE
+)
+for (rda in rdas) {
+  load(rda)
+}
+
+rm(rdas, rda)
+
+# create a list of all rda files with "result" suffix
+# check for sites we may want to exclude
+googlesheets4::gs4_deauth()
+site_google_url <- "https://docs.google.com/spreadsheets/d/1epcYNd_0jCUMktOHf8mz5v651zy1JALD6PgzobrGWDY/edit?usp=sharing"
+site_params <- googlesheets4::read_sheet(site_google_url, sheet = 1)
+site_avails <- googlesheets4::read_sheet(site_google_url, sheet = 2)
+
+# sorted_sites <- site_avails %>%
+#   filter(`data received` == "Y") %>% # , is.na(excluded)) %>%
+#   pull(siteid)
+#
+# # keep only sites in 'sorted_sites' list
+# ## add results to site name
+# sorted_sites <- paste(sorted_sites, "results", sep = "_")
+sorted_sites <- c("UPENN", "NWU", "MGB", "UPITT")
+```
+
+## Four sites for now
+"UPENN", "NWU", "MGB", "UPITT"
+
+```{r}
+sorted_sites <- paste(sorted_sites, "results", sep = "_")
+site_results <- mget(ls(pattern = "result"))
+site_results <- site_results[sorted_sites]
+
+neuro_chr_to_analyze <- "neuro_postCentral"
+
+get_result_row <- function(df,
+                           outcome = "time_severe_reg_elix",
+                           period = "first_hosp_results",
+                           neuro_type = "cpns_results") {
+  life_output <- df[[c(period, neuro_type, outcome, "life")]]
+  bind_cols(life_output[c("surv", "std.err", "time", "strata")]) %>%
+    mutate(
+      site = df$site,
+      n_site = df[[c(period, neuro_type, outcome, "cox", "n")]]
+    )
+}
+
+outcomes <-
+  c(
+    "time_severe_reg_elix",
+    "time_deceased_reg_elix",
+    "time_readmit_reg_elix"
+  )
+
+meta_results <- list()
+
+for (outcome_i in outcomes) {
+  meta_results[[outcome_i]] <-
+    site_results %>%
+    lapply(get_result_row, outcome = outcome_i) %>%
+    bind_rows() %>%
+    mutate(outcome = outcome_i)
+}
+
+res_dat <- bind_rows(meta_results) %>%
+  mutate(
+    strata = str_replace(strata, "neuro_post=", ""),
+    outcome = outcome %>% fct_recode(
+      "Severity" = "time_severe_reg_elix",
+      "Mortality" = "time_deceased_reg_elix",
+      "Readmission" = "time_readmit_reg_elix"
+    )
+  ) %>%
+  filter(outcome != "Readmission") %>%
+  add_count(site, strata, outcome, name = "n_timepoints") %>%
+  complete(time, site, nesting(strata, outcome)) %>%
+  mutate(surv = if_else(is.na(surv) & time == 0, 1, surv)) %>%
+  group_by(site, strata, outcome) %>%
+  fill(surv, .direction = "down") %>%
+  fill(std.err, n_site, n_timepoints, .direction = "downup") %>%
+  filter(n_timepoints >= 5)
+```
+
+```{r}
+get_surv <- function(surv, std.err) {
+  if (length(surv) == 1) {
+    return(surv)
+  } else {
+    junk <- rma(y = surv, sei = std.err, method = "DL") # metafor for each strata
+    return(c(junk$beta))
+  }
+}
+
+get_se <- function(surv, std.err) {
+  if (length(std.err) == 1) {
+    return(std.err)
+  } else {
+    junk <- metafor::rma(y = surv, sei = std.err, method = "DL") # metafor for each strata
+    return(c(junk$se))
+  }
+}
+```
+
+## Meta-analysis for severity and mortality
+
+```{r}
+meta_surv_df <- res_dat %>%
+  group_by(strata, time, outcome) %>%
+  summarise(
+    se = get_se(surv, std.err),
+    meta_surv = get_surv(surv, std.err),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    ymin = meta_surv - 1.96 * se,
+    ymax = meta_surv + 1.96 * se
+  ) %>%
+  mutate(outcome = fct_rev(outcome))
+
+meta_surv_df %>%
+  ggplot(aes(
+    x = time, y = meta_surv,
+    color = fct_reorder2(strata, outcome, meta_surv)
+  )) +
+  geom_line(aes()) +
+  # geom_ribbon(aes(ymin = ymin, ymax = ymax), alpha = 0.1, linetype = 2) +
+  labs(color = NULL, y = NULL) +
+  rcartocolor::scale_color_carto_d() +
+  facet_wrap(~outcome) +
+  ggrepel::geom_text_repel(
+    data = . %>% filter(
+      time == last(time),
+      outcome == "Mortality"
+    ),
+    aes(
+      label = strata,
+      x = time + 10,
+      y = meta_surv,
+      color = strata
+    ), direction = "y"
+  ) +
+  coord_cartesian(clip = "off", ylim = c(0, 1)) +
+  guides(color = FALSE) +
+  theme_classic() +
+  # theme(plot.margin = margin(2, 50, 2, 2))+
+  NULL
+```
+
+### Alternatively, compute average survival by hand
+Not evaluated for now.
+Need to recompute `n_site`.
+
+```{r eval=FALSE}
+res_dat %>%
+  group_by(strata, time, outcome) %>%
+  summarise(meta_surv = sum(surv * n_site) / sum(n_site), .groups = "drop") %>%
+  mutate(outcome = fct_rev(outcome)) %>%
+  ggplot(aes(
+    x = time, y = meta_surv,
+    color = fct_reorder2(strata, outcome, meta_surv)
+  )) +
+  geom_line(aes()) +
+  labs(color = NULL, y = NULL) +
+  rcartocolor::scale_color_carto_d() +
+  facet_wrap(~outcome) +
+  geom_text(
+    data = . %>% filter(
+      time == last(time),
+      outcome == "Mortality"
+    ),
+    aes(
+      label = strata,
+      x = time + 10,
+      y = meta_surv,
+      color = strata
+    ),
+    hjust = 0
+  ) +
+  coord_cartesian(clip = "off", ylim = c(0, 1)) +
+  guides(color = FALSE) +
+  theme_classic() +
+  theme(plot.margin = margin(2, 50, 2, 2))
+```
