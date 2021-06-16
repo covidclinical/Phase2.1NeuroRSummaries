@@ -27,19 +27,17 @@ site_google_url <- "https://docs.google.com/spreadsheets/d/1epcYNd_0jCUMktOHf8mz
 site_params <- googlesheets4::read_sheet(site_google_url, sheet = 1)
 site_avails <- googlesheets4::read_sheet(site_google_url, sheet = 2)
 
-# sorted_sites <- site_avails %>%
-#   filter(`data received` == "Y") %>% # , is.na(excluded)) %>%
-#   pull(siteid)
+sorted_sites <- site_avails %>%
+  filter(new_received == "Y") %>% # , is.na(excluded)) %>%
+  pull(siteid)
 #
 # # keep only sites in 'sorted_sites' list
 # ## add results to site name
 # sorted_sites <- paste(sorted_sites, "results", sep = "_")
 # sorted_sites <- c("UPENN", "NWU", "MGB", "UPITT")
-sorted_sites <- c("UPENN", "NWU", "MGB")
 ```
 
-## Four sites for now
-"UPENN", "NWU", "MGB", "UPITT"
+## Early tested existing sites for now
 
 ```{r}
 sorted_sites <- paste(sorted_sites, "results", sep = "_")
@@ -80,8 +78,8 @@ get_cox_row <- function(df,
 ```{r}
 outcomes <-
   c(
-    "n_stay_reg_elix",
-    "total_stay_reg_elix",
+    "time_first_discharge_reg_elix",
+    "time_last_discharge_reg_elix",
     "time_readmit_reg_elix",
     "time_severe_reg_elix",
     "time_deceased_reg_elix"
@@ -151,8 +149,8 @@ meta_surv_df <- res_dat %>%
         "Mortality" = "time_deceased_reg_elix",
         "Severity" = "time_severe_reg_elix",
         "Readmission" = "time_readmit_reg_elix",
-        "Time to last discharge" = "total_stay_reg_elix",
-        "Time to first discharge" = "n_stay_reg_elix"
+        "Time to last discharge" = "time_last_discharge_reg_elix",
+        "Time to first discharge" = "time_first_discharge_reg_elix"
       )
   )
 
@@ -183,6 +181,57 @@ meta_surv_df %>%
   theme_classic() +
   # theme(plot.margin = margin(2, 50, 2, 2))+
   NULL
+```
+
+
+
+```{r}
+
+strata_cols <- data.frame(
+  strata = unique(meta_surv_df$strata), 
+  strata_col = rev(rcartocolor::carto_pal(4, "Vivid")))
+surv_plot_df <- meta_surv_df %>%
+  left_join(strata_cols, by = 'strata') 
+
+groups <- c("Central", "Peripheral", "Both")
+surv_curves <- list()
+for (group in groups) {
+  # cat(group)
+  surv_curves[[group]] <- surv_plot_df %>% 
+  filter(strata %in% c("None", group),
+         # outcome != "Time to last discharge"
+         ) %>% 
+  ggplot(aes(
+    x = time, y = meta_surv,
+    # color = fct_reorder2(strata_col, outcome, meta_surv)
+    color = strata_col
+  )) +
+  geom_line(aes()) +
+  # geom_ribbon(aes(ymin = ymin, ymax = ymax), alpha = 0.1, linetype = 2) +
+  labs(color = NULL, y = NULL) +
+  # rcartocolor::scale_color_carto_d() +
+  scale_color_identity() +
+  facet_wrap(~outcome, ncol = 4) +
+  ggrepel::geom_text_repel(
+    data = . %>% filter(
+      time == last(time),
+      outcome == "Mortality"
+    ),
+    aes(
+      label = strata,
+      x = time + 10,
+      y = meta_surv,
+      color = strata_col
+    ), direction = "y"
+  ) +
+  coord_cartesian(clip = "off", ylim = c(0, 1), expand = FALSE) +
+  guides(color = FALSE) +
+  theme_classic() +
+  # theme(plot.margin = margin(2, 50, 2, 2))+
+  NULL
+}
+
+cowplot::plot_grid(plotlist = surv_curves, ncol = 1, labels = 'AUTO')
 ```
 
 ### Alternatively, compute average survival by hand
