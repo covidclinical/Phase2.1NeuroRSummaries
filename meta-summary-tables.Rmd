@@ -82,6 +82,6 @@ supp_table <- result_table %>%
   arrange(desc(Analysis))
   
 
-write.csv(supp_table, "meta_tables/Supplementary_table.csv", row.names = FALSE)
+write.csv(supp_table, "meta_tables/Supplementary_Table.csv", row.names = FALSE)
 ```
 
