@@ -1,0 +1,87 @@
+---
+title: "meta-survival-tables"
+author: "Meg Hutch"
+date: "6/21/2021"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+cns <- read.csv("meta_tables/surivival_analysis_neuro_postCentral.csv")
+
+pns <- read.csv("meta_tables/surivival_analysis_neuro_postPeripheral.csv")
+
+both <- read.csv("meta_tables/surivival_analysis_neuro_postBoth.csv")
+```
+
+```{r}
+cns$Neuro <- "CNS"
+pns$Neuro <- "PNS"
+both$Neuro <- "Both"
+
+results <- rbind(cns, pns, both)
+
+result_table <- results %>% 
+  filter(Analysis == "") %>% 
+  select(-Analysis, -Weight.random) %>% 
+  rename("Analysis" = X,
+         "Estimate" = Estimate.)
+```
+
+Format p-values
+
+```{r}
+result_table <- result_table %>% 
+  mutate(`P-value` = if_else(p.value < 0.05 & p.value >= 0.001, round(p.value, 2), p.value),
+         `P-value` = if_else(p.value >= 0.05, round(p.value, 2), `P-value`),
+         sig = if_else(`P-value` < 0.001, 1, 0),
+         `P-value` = as.character(`P-value`),
+         `P-value` = if_else(sig == 1, "<.001", `P-value`))
+```
+
+Rename factors
+
+```{r}
+result_table$Analysis <- recode_factor(result_table$Analysis,
+                                       "time_deceased_reg_elix" = "Time to Mortality", 
+                                       "time_severe_reg_elix" = "Time to Severity",
+                                       "time_first_discharge_reg_elix" = "Time to First Discharge",
+                                       "time_last_discharge_reg_elix" = "Time to Last Discharge")
+```
+
+Clean up table
+
+```{r}
+result_table <- result_table %>% 
+  select(-sig) %>% 
+  select(Analysis, Neuro,  Estimate, p.value, `P-value`, everything())
+```
+
+Save manuscript table
+
+```{r}
+manuscript_table <- result_table %>% 
+  select(Analysis, Neuro, Estimate, `P-value`) %>% 
+  arrange(desc(Analysis))
+
+write.csv(manuscript_table, "meta_tables/Manuscript_Table.csv", row.names = FALSE)
+```
+
+Save supplementary table
+
+```{r}
+supp_table <- result_table %>% 
+   mutate(I2 = paste(I2, I2.CI),
+          tau2 = paste(tau2, tau2.CI)) %>% 
+  select(Analysis, Estimate, p.value, Predict.CI, I2, tau2) %>%
+  rename("Prediction Interval" = Predict.CI,
+         "P-value" = p.value) %>% 
+  arrange(desc(Analysis))
+  
+
+write.csv(supp_table, "meta_tables/Supplementary_table.csv", row.names = FALSE)
+```
+
