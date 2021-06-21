@@ -6,8 +6,6 @@ output: html_document
 ```{r message=FALSE, warning=FALSE}
 library(tidyverse)
 library(metafor)
-library(meta)
-source("R/forester_custom.R")
 ```
 
 ```{r}
@@ -19,30 +17,30 @@ rdas <- list.files(
 for (rda in rdas) {
   load(rda)
 }
-
 rm(rdas, rda)
-
 # create a list of all rda files with "result" suffix
 # check for sites we may want to exclude
 googlesheets4::gs4_deauth()
 site_google_url <- "https://docs.google.com/spreadsheets/d/1epcYNd_0jCUMktOHf8mz5v651zy1JALD6PgzobrGWDY/edit?usp=sharing"
 site_params <- googlesheets4::read_sheet(site_google_url, sheet = 1)
 site_avails <- googlesheets4::read_sheet(site_google_url, sheet = 2)
-
 sorted_sites <- site_avails %>%
-   filter(new_received == "Y") %>% # , is.na(excluded)) %>%
-   pull(siteid)
+  filter(new_received == "Y") %>% # , is.na(excluded)) %>%
+  pull(siteid)
+#
+# # keep only sites in 'sorted_sites' list
+# ## add results to site name
+# sorted_sites <- paste(sorted_sites, "results", sep = "_")
+# sorted_sites <- c("UPENN", "NWU", "MGB", "UPITT")
 ```
 
-change ```neuro_chr_to_analyze``` in order to change analysis to 'neuro_postCentral', neuro_postPeripheral', 'neuro_postBoth'
+## Early tested existing sites for now
 
 ```{r}
 sorted_sites <- paste(sorted_sites, "results", sep = "_")
 site_results <- mget(ls(pattern = "result"))
 site_results <- site_results[sorted_sites]
-
-neuro_chr_to_analyze <- "neuro_postBoth"
-
+neuro_chr_to_analyze <- "neuro_postCentral"
 get_life_row <- function(df,
                          outcome = "time_severe_reg_elix",
                          period = "first_hosp_results",
@@ -54,7 +52,6 @@ get_life_row <- function(df,
       n_site = df[[c(period, neuro_type, outcome, "cox", "n")]]
     )
 }
-
 # df = site_results[[1]]
 get_cox_row <- function(df,
                         outcome = "time_severe_reg_elix",
@@ -75,14 +72,13 @@ get_cox_row <- function(df,
 ```{r}
 outcomes <-
   c(
-    "time_severe_reg_elix", 
-    "time_deceased_reg_elix",
+    "time_first_discharge_reg_elix",
     "time_last_discharge_reg_elix",
-    "time_first_discharge_reg_elix"
+    "time_readmit_reg_elix",
+    "time_severe_reg_elix",
+    "time_deceased_reg_elix"
   )
-
 meta_results <- list()
-
 for (outcome_i in outcomes) {
   meta_results[[outcome_i]] <-
     site_results %>%
@@ -90,7 +86,6 @@ for (outcome_i in outcomes) {
     bind_rows() %>%
     mutate(outcome = outcome_i)
 }
-
 res_dat <- bind_rows(meta_results) %>%
   mutate(std.err = if_else(is.nan(std.err), NA_real_, std.err)) %>%
   add_count(site, strata, outcome, name = "n_timepoints") %>%
@@ -112,7 +107,6 @@ get_surv <- function(surv, std.err) {
     return(c(junk$beta))
   }
 }
-
 get_se <- function(surv, std.err) {
   if (length(std.err) == 1) {
     return(std.err)
@@ -144,11 +138,11 @@ meta_surv_df <- res_dat %>%
       fct_recode(
         "Mortality" = "time_deceased_reg_elix",
         "Severity" = "time_severe_reg_elix",
+        "Readmission" = "time_readmit_reg_elix",
         "Time to last discharge" = "time_last_discharge_reg_elix",
         "Time to first discharge" = "time_first_discharge_reg_elix"
       )
   )
-
 meta_surv_df %>%
   ggplot(aes(
     x = time, y = meta_surv,
@@ -176,6 +170,54 @@ meta_surv_df %>%
   theme_classic() +
   # theme(plot.margin = margin(2, 50, 2, 2))+
   NULL
+```
+
+
+
+```{r}
+strata_cols <- data.frame(
+  strata = unique(meta_surv_df$strata), 
+  strata_col = rev(rcartocolor::carto_pal(4, "Vivid")))
+surv_plot_df <- meta_surv_df %>%
+  left_join(strata_cols, by = 'strata') 
+groups <- c("Central", "Peripheral", "Both")
+surv_curves <- list()
+for (group in groups) {
+  # cat(group)
+  surv_curves[[group]] <- surv_plot_df %>% 
+  filter(strata %in% c("None", group),
+         # outcome != "Time to last discharge"
+         ) %>% 
+  ggplot(aes(
+    x = time, y = meta_surv,
+    # color = fct_reorder2(strata_col, outcome, meta_surv)
+    color = strata_col
+  )) +
+  geom_line(aes()) +
+  # geom_ribbon(aes(ymin = ymin, ymax = ymax), alpha = 0.1, linetype = 2) +
+  labs(color = NULL, y = NULL) +
+  # rcartocolor::scale_color_carto_d() +
+  scale_color_identity() +
+  facet_wrap(~outcome, ncol = 4) +
+  ggrepel::geom_text_repel(
+    data = . %>% filter(
+      time == last(time),
+      outcome == "Mortality"
+    ),
+    aes(
+      label = strata,
+      x = time + 10,
+      y = meta_surv,
+      color = strata_col
+    ), direction = "y"
+  ) +
+  coord_cartesian(clip = "off", ylim = c(0, 1), expand = FALSE) +
+  guides(color = FALSE) +
+  theme_classic() +
+  # theme(plot.margin = margin(2, 50, 2, 2))+
+  NULL
+}
+cowplot::plot_grid(plotlist = surv_curves, ncol = 1, labels = 'AUTO')
 ```
 
 ### Alternatively, compute average survival by hand
@@ -218,7 +260,6 @@ Need to recompute `n_site`.
 
 ```{r}
 cox_results <- list()
-
 for (outcome_i in outcomes) {
   cox_results[[outcome_i]] <-
     site_results %>%
@@ -226,407 +267,7 @@ for (outcome_i in outcomes) {
     bind_rows() %>%
     mutate(outcome = outcome_i)
 }
-
 cox_results$time_deceased_reg_elix %>%
-  filter(variable == "neuro_postCentral") %>%
-  with(rma(yi = coef, sei = se.coef., method = "DL"))
-
-cox_results$time_severe_reg_elix %>%
-  filter(variable == "neuro_postCentral") %>%
-  with(rma(yi = coef, sei = se.coef., method = "DL"))
-
-cox_results$time_first_discharge_reg_elix %>%
-  filter(variable == "neuro_postCentral") %>%
-  with(rma(yi = coef, sei = se.coef., method = "DL"))
-
-cox_results$time_last_discharge_reg_elix %>%
-  filter(variable == "neuro_postCentral") %>%
+  filter(variable == "neuro_postBoth") %>%
   with(rma(yi = coef, sei = se.coef., method = "DL"))
 ```
-
-## Random effects meta-analysis
-
-```{r}
-for (outcome_i in outcomes) {
-  meta_results[[outcome_i]] <-
-    cox_results[[outcome_i]] %>% 
-    bind_rows %>% 
-    data.frame() %>% 
-    filter(variable == neuro_chr_to_analyze) %>% 
-    metagen(
-      TE = coef,
-      seTE = se.coef.,
-      data = .,
-      sm = 'HR', # hazard ratios
-      comb.random = TRUE,
-      comb.fixed = FALSE,
-      method.tau = "DL", #default tau method
-      hakn = FALSE,
-      prediction=TRUE,
-      studlab = site
-      
-    )
-}
-```
-
-**Abstract & format meta-results of interest**
-
-```{r}
-ma_combine = list()
-
-for (i in names(meta_results)) {
-  TE = meta_results[[i]][["TE"]]
-  studlab = meta_results[[i]][["studlab"]]
-  upper = meta_results[[i]][["upper"]]
-  lower = meta_results[[i]][["lower"]]
-  TE.random = meta_results[[i]][["TE.random"]]
-  lower.random = meta_results[[i]][["lower.random"]]
-  upper.random = meta_results[[i]][["upper.random"]]
-  pval.random = meta_results[[i]][["pval.random"]]
-  Weight.random = meta_results[[i]][["w.random"]]
-  lower.predict = meta_results[[i]][["lower.predict"]]
-  upper.predict = meta_results[[i]][["upper.predict"]]
-  I2 = meta_results[[i]][["I2"]]
-  lower.I2 = meta_results[[i]][["lower.I2"]]
-  upper.I2 = meta_results[[i]][["upper.I2"]]
-  H = meta_results[[i]][["H"]]
-  lower.H = meta_results[[i]][["H"]]
-  upper.H = meta_results[[i]][["upper.H"]]
-  tau2 = meta_results[[i]][["tau2"]]
-  lower.tau2 = meta_results[[i]][["lower.tau2"]]
-  upper.tau2 = meta_results[[i]][["upper.tau2"]]
-  analysis = paste(i)
-  df <- cbind(analysis, studlab, TE, upper, lower, TE.random, lower.random, upper.random, Weight.random,
-              pval.random, lower.predict, upper.predict, I2, lower.I2, upper.I2, H, lower.H, upper.H, 
-              tau2, lower.tau2, upper.tau2)
-  
-  ma_combine[[i]] <- df
-}
-
-combined_results <- do.call(rbind.data.frame, ma_combine)
-```
-
-We will convert our log(HR) to HR to facilitate interpretation and we will also perform appropriate rounding and rename variables here
-
-```{r}
-combined_results <- combined_results %>%
-  mutate_at(vars(TE:upper.tau2), ~ as.character(.) %>% as.numeric()) %>% 
-  mutate_at(vars(TE:upper.predict, -pval.random, -Weight.random), ~ if_else(analysis == "time_deceased_reg_elix", exp(.),
-                                              if_else(analysis == "time_severe_reg_elix", exp(.),
-                                                              if_else(analysis == "time_last_discharge_reg_elix", exp(.),
-                                                                      if_else(analysis == "time_first_discharge_reg_elix", exp(.), .))))) %>% 
-  mutate_at(vars(TE:upper.tau2, -pval.random), ~ round(., 2)) %>%
-  mutate(CI.random = paste("(", lower.random, ",", upper.random, ")")) %>%
-  rename("Site" = studlab, 
-         "Estimate" = TE, 
-         "p-value" = pval.random,
-         "CI.High" = upper,
-         "CI.Low" = lower,
-         "CI" = CI.random)
-```
-
-
-Add blank rows to facilitate formatting
-
-```{r}
-df_new <- as.data.frame(lapply(combined_results, as.character), stringsAsFactors = FALSE)
-# add two blank rows
-combined_results <- head(do.call(rbind, by(df_new, combined_results$analysis, rbind, "", "")), -1)
-
-# add row to top row
-combined_results <- combined_results %>% 
-  add_row(.before = 1) %>%
-  add_row(.before = 1)
-
-# remove last row
-combined_results <- combined_results %>% 
-  head(-1)
-
-# convert NA to blank rows
-combined_results[is.na(combined_results)] <- ""
-```
-
-Carry over name of the analysis to the blank row
-
-```{r}
-# first convert blank spaces to NA
-combined_results[combined_results == ""] <- NA
-
-# Add the analysis labels to the original site level rows - these will be our labels for the forest plots
-combined_results <- combined_results %>% 
-  fill(analysis, .direction = "up") %>%
-  mutate(id = seq_len(nrow(.)),
-         Site = if_else(is.na(Site), analysis, Site),
-         lag_Site = lag(Site),
-         lag_Site = if_else(is.na(lag_Site), "First", lag_Site),
-         Site = ifelse(Site == lag_Site, paste(Site, "_", id), Site)) %>% 
-  select(-analysis, -lag_Site, -id) %>%
-  rename("Analysis" = Site) 
-```
-
-Indent site results
-
-```{r}
-# convert columns back to numeric
-combined_results <- combined_results %>%
-  mutate_at(vars(Estimate:upper.tau2), ~ as.character(.) %>% as.numeric())
-
-combined_results$Analysis <- ifelse(is.na(combined_results$Estimate),
-                         combined_results$Analysis,
-                         paste0("   ", combined_results$Analysis))
-```
-
-Change row names to make it easier to subset the data by analysis for the forest plots
-
-```{r}
-rownames(combined_results) <- ifelse(is.na(combined_results$Estimate),
-                                     paste(combined_results$Analysis),
-                                     rownames(combined_results))
-
-# make the secondary analysis label blank
-combined_results <- combined_results %>%
-  mutate(Analysis = ifelse(grepl("_", Analysis), NA, Analysis))
-```
-
-Additional formatting to integrate the random-effects meta analysis results with the regression estimates
-
-```{r}
-# select the variables representing results from the overall meta-analysis 
-overall_results <- c("TE.random", "upper.random", "lower.random", "p.value", "CI", 
-       "lower.predict", 'upper.predict', 'I2', 'lower.I2', 'upper.I2', 'H', 
-       'lower.H', 'upper.H', 'tau2', 'lower.tau2', 'upper.tau2')
-
-# fill these columns up to the first overall meta-analysis results row where there are currently NAs
-combined_results <- combined_results %>%
-  fill(overall_results, .direction = "up")
-
-# subsequently, make the site level information NA for the following columns
-combined_results <- combined_results %>% 
-  mutate_at(vars(overall_results), ~ ifelse(is.na(Estimate), .x, NA))
-
-# move meta analysis results to the same columns as the site regression estimates 
-combined_results$Estimate <- ifelse(is.na(combined_results$Estimate), combined_results$TE.random, combined_results$Estimate)
-combined_results$CI.High <- ifelse(is.na(combined_results$CI.High), combined_results$upper.random, combined_results$CI.High)
-combined_results$CI.Low <- ifelse(is.na(combined_results$CI.Low), combined_results$lower.random, combined_results$CI.Low)
-
-# create new 'Estimate' column that we can append CIs 
-# format the p-values so we don't lose trailing zeros which occurs with as.character()
-# the below steps seem long but best way as of now to ensure that we can add < signs and asterisks when dealing with numeric and character data 
-combined_results <- combined_results %>% 
-  mutate('Estimate ' = paste(Estimate, "(", CI.Low, ",", CI.High, ")"),
-         p.value_round = round(p.value, 5),
-         sig = if_else(p.value < 0.05, 1, 0),
-         p.value_format = ifelse(p.value_round < 0.00001, "< 0.00001", p.value_round),
-         p.value_format2 = sprintf("%.2f", p.value),
-         p.value_format = ifelse(p.value_format == "< 0.00001", p.value_format, p.value_format2),
-         `P-value` = if_else(sig == 1, paste(p.value_format, "*"), p.value_format),
-         `P-value` = if_else(`P-value` == "0.00 *", "< 0.05 *", `P-value`)) %>%
-  select(-p.value_round, -p.value_format, -p.value_format2, -sig) 
-
-combined_results$p.value[combined_results$p.value == "NA"] <- ""
-combined_results[is.na(combined_results)] <- ""
-
-
-# make the second analysis row blank
-cols <- colnames(combined_results)
-
-combined_results[ ,cols] <- as.data.frame(lapply(cols, 
-              FUN = function(x) ifelse(combined_results$Analysis == "" & dplyr::lead(combined_results$Analysis, default = first(combined_results$Analysis)) != "", "", combined_results[, x])))
-
-# convert back to numeric
-combined_results <- combined_results %>% 
-  mutate_at(vars(overall_results, Estimate, Weight.random, CI.High, CI.Low), ~ as.character(.) %>% as.numeric()) %>%
-  mutate(Analysis = as.character(Analysis),
-         Analysis = ifelse(is.na(Estimate), "Site", Analysis)) %>%
-  select(-TE.random, -lower.random, -upper.random)
-```
-
-### Create Results Table
-
-```{r}
-results_table <- combined_results %>% 
-  select(Analysis, `Estimate `, Weight.random, p.value,
-         lower.predict, upper.predict,
-         I2, lower.I2, upper.I2,
-         H, lower.H, upper.H,
-         tau2, lower.tau2, upper.tau2) %>% 
-  mutate(Predict.CI = paste("(", lower.predict, ",", upper.predict, ")"),
-         I2.CI = paste("(", lower.I2, ",", upper.I2, ")"),
-         H.CI = paste("(", lower.H, ",", upper.H, ")"),
-         tau2.CI = paste("(", lower.tau2, ",", upper.tau2, ")")) %>%
-  select(-lower.predict, -upper.predict, -lower.I2, -upper.I2, -lower.H, -upper.H, -lower.tau2, -upper.tau2) %>% 
-  select(Analysis, `Estimate `, Weight.random, p.value, Predict.CI, I2, I2.CI, tau2, tau2.CI)
-
-results_table[results_table == "( NA , NA )"] <- ""
-results_table[is.na(results_table)] <- ""
-
-
-write.csv(results_table, file = paste0("meta_tables/surivival_analysis_", neuro_chr_to_analyze, ".csv"))
-```
-
-## Results
-
-Define a vector of invalid sites. As of now, ICSM and NUH, have such low counts that CIs and estimates are very high/low. To standardize the plots, we will want to abstract the min/max values while excluding any outlier sites like ICSM and NUH
-
-```{r}
-invalid_sites <- sorted_sites[sorted_sites %in% c("NUH", "ICSM")]
-
-# indent the sites to facilitate mapping with our combined_results df
-invalid_sites <- paste0("   ", invalid_sites)
-```
-
-create a scale function to identify the min and max CI for each site, excluding sites with values of 'Inf' or our invalid sites
-
-```{r}
-scale_plot <- function(combined_results_df) {
-  
-  scale <- combined_results_df %>% 
-  filter(!Analysis %in% invalid_sites,
-         !CI.Low == "Inf",
-         !CI.High == "Inf") %>% 
-  mutate(min_est = min(CI.Low, na.rm = TRUE)-1,
-         max_est = max(CI.High, na.rm = TRUE)+1,
-         max_est = if_else(max_est < 1, 1.5, max_est)) %>% 
-  distinct(min_est, max_est)
-  
-  return(scale)
-  
-}
-```
-
-
-### Time to First Discharge
-
-```{r fig.width=8, message=FALSE, warning=FALSE}
-length_stay_first_results <- combined_results %>% 
-  slice(grep(paste("time_first_discharge_reg_elix", collapse="|"), row.names(.)))
-
-## define forest plot shapes
-# shape #16 is normal circle; #18 is diamond
-shapes <- rep(16, times = nrow(length_stay_first_results))
-shapes[1] <- 18
-
-sizes <- rep(3.25, times = nrow(length_stay_first_results))
-sizes[1] <- 5
-
-scale <- scale_plot(length_stay_first_results)
-
-forester(left_side_data = length_stay_first_results[1],
-         estimate = length_stay_first_results$Estimate,
-         ci_low = length_stay_first_results$CI.Low,
-         ci_high = length_stay_first_results$CI.High,
-         right_side_data = length_stay_first_results[,c("Estimate ", "P-value")],
-         display = TRUE,
-         font_family = "arial",
-         arrows = TRUE, 
-         arrow_labels = c("Decreased Risk", "Increased Risk"),
-         null_line_at = 1,
-         xlim = c(scale$min_est, scale$max_est),
-         xbreaks = c(scale$min_est, 1, scale$max_est),
-         point_sizes = sizes,
-         point_shapes = shapes,
-         file_path = here::here(paste0("figs/surivial_time_first_discharge", neuro_chr_to_analyze,".png")))
-```
-
-### Time to Last Discharge
-
-```{r fig.width=8, message=FALSE, warning=FALSE}
-length_stay_last_results <- combined_results %>% 
-  slice(grep(paste("time_last_discharge_reg_elix", collapse="|"), row.names(.)))
-
-## define forest plot shapes
-# shape #16 is normal circle; #18 is diamond
-shapes <- rep(16, times = nrow(length_stay_last_results))
-shapes[1] <- 18
-
-sizes <- rep(3.25, times = nrow(length_stay_last_results))
-sizes[1] <- 5
-
-scale <- scale_plot(length_stay_last_results)
-
-forester(left_side_data = length_stay_last_results[1],
-         estimate = length_stay_last_results$Estimate,
-         ci_low = length_stay_last_results$CI.Low,
-         ci_high = length_stay_last_results$CI.High,
-         right_side_data = length_stay_last_results[,c("Estimate ", "P-value")],
-         display = TRUE,
-         font_family = "arial",
-         arrows = TRUE, 
-         arrow_labels = c("Decreased Risk", "Increased Risk"),
-         null_line_at = 1,
-         xlim = c(scale$min_est, scale$max_est),
-         xbreaks = c(scale$min_est, 1, scale$max_est),
-         point_sizes = sizes,
-         point_shapes = shapes,
-         file_path = here::here(paste0("figs/surivial_time_last_discharge", neuro_chr_to_analyze,".png")))
-```
-
-### Time to Severe COVID-19 
-
-```{r fig.width=8, message=FALSE, warning=FALSE}
-time_severe_results <- combined_results %>% 
-  slice(grep(paste("time_severe_reg_elix", collapse="|"), row.names(.)))
-
-## define forest plot shapes
-# shape #16 is normal circle; #18 is diamond
-shapes <- rep(16, times = nrow(time_severe_results))
-shapes[1] <- 18
-
-sizes <- rep(3.25, times = nrow(time_severe_results))
-sizes[1] <- 5
-
-scale <- scale_plot(time_severe_results)
-
-forester(left_side_data = time_severe_results[1],
-         estimate = time_severe_results$Estimate,
-         ci_low = time_severe_results$CI.Low,
-         ci_high = time_severe_results$CI.High,
-         right_side_data = time_severe_results[,c("Estimate ", "P-value")],
-         display = TRUE,
-         font_family = "arial",
-         arrows = TRUE, 
-         arrow_labels = c("Decreased Risk", "Increased Risk"),
-         null_line_at = 1,
-         xlim = c(scale$min_est, scale$max_est),
-         xbreaks = c(scale$min_est, 1, scale$max_est),
-         point_sizes = sizes,
-         point_shapes = shapes,
-         file_path = here::here(paste0("figs/surivial_time_to_severe", neuro_chr_to_analyze,".png")))
-```
-
-
-### Time to Mortality
-
-```{r fig.width=8, message=FALSE, warning=FALSE}
-time_death_results <- combined_results %>% 
-  slice(grep(paste("time_deceased_reg_elix", collapse="|"), row.names(.)))
-
-## define forest plot shapes
-# shape #16 is normal circle; #18 is diamond
-shapes <- rep(16, times = nrow(time_death_results))
-shapes[1] <- 18
-
-sizes <- rep(3.25, times = nrow(time_death_results))
-sizes[1] <- 5
-
-scale <- scale_plot(time_death_results)
-
-forester(left_side_data = time_death_results[1],
-         estimate = time_death_results$Estimate,
-         ci_low = time_death_results$CI.Low,
-         ci_high = time_death_results$CI.High,
-         right_side_data = time_death_results[,c("Estimate ", "P-value")],
-         display = TRUE,
-         font_family = "arial",
-         arrows = TRUE, 
-         arrow_labels = c("Decreased Risk", "Increased Risk"),
-         null_line_at = 1,
-         xlim = c(scale$min_est, scale$max_est),
-         xbreaks = c(scale$min_est, 1, scale$max_est),
-         point_sizes = sizes,
-         point_shapes = shapes,
-         file_path = here::here(paste0("figs/surivial_time_to_death", neuro_chr_to_analyze,".png")))
-```
-
-
-
