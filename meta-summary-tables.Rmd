@@ -57,14 +57,16 @@ Clean up table
 ```{r}
 result_table <- result_table %>% 
   select(-sig) %>% 
-  select(Analysis, Neuro,  Estimate, p.value, `P-value`, everything())
+  rename("Hazard Ratio" = Estimate, 
+         "Neuro Status" = Neuro) %>% 
+  select(Analysis, `Neuro Status`, `Hazard Ratio`, p.value, `P-value`, everything())
 ```
 
 Save manuscript table
 
 ```{r}
 manuscript_table <- result_table %>% 
-  select(Analysis, Neuro, Estimate, `P-value`) %>% 
+  select(Analysis, `Neuro Status`, `Hazard Ratio`, `P-value`) %>% 
   arrange(desc(Analysis))
 
 write.csv(manuscript_table, "meta_tables/Manuscript_Table.csv", row.names = FALSE)
@@ -76,7 +78,7 @@ Save supplementary table
 supp_table <- result_table %>% 
    mutate(I2 = paste(I2, I2.CI),
           tau2 = paste(tau2, tau2.CI)) %>% 
-  select(Analysis, Estimate, p.value, Predict.CI, I2, tau2) %>%
+  select(Analysis, `Neuro Status`, `Hazard Ratio`, p.value, Predict.CI, I2, tau2) %>%
   rename("Prediction Interval" = Predict.CI,
          "P-value" = p.value) %>% 
   arrange(desc(Analysis))
