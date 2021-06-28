@@ -1,5 +1,5 @@
 ---
-title: "Demo Figure"
+title: "Demographics"
 author: "Meg Hutch"
 date: "3/22/2021"
 output: html_document
@@ -36,12 +36,8 @@ site_google_url <- "https://docs.google.com/spreadsheets/d/1epcYNd_0jCUMktOHf8mz
 site_params <- googlesheets4::read_sheet(site_google_url, sheet = 1)
 site_avails <- googlesheets4::read_sheet(site_google_url, sheet = 2)
 sorted_sites <- site_avails %>%
-  filter(`data received` == "Y") %>% #, is.na(excluded)) %>%
+  filter(new_received == "Y") %>%
   pull(siteid)
-
-# sorted_sites <- rev(c(
-#   "APHP", "FRBDX", "HPG23", "ICSM", "MGB", "NWU", "UPENN", "UPITT"
-# ))
 
 sites_wo_race <- site_params %>%
   filter(!include_race) %>%
@@ -264,7 +260,7 @@ other_table_for_figs %>%
   ggplot(aes(y = value, x = type, fill = site)) +
   facet_grid(vars(grouped_var), vars(me), scales = "free") +
   geom_bar(stat = "identity", position = "dodge", colour = "black") +
-  scale_fill_brewer(palette = "Dark2") +
+  #scale_fill_brewer(palette = "Dark2") +
   labs(x = NULL, y = NULL, fill = NULL)
 ```
 
@@ -362,10 +358,9 @@ kbl(tableOne_compiled) %>%
   pack_rows("Age", 4, 13) %>%
   pack_rows("Race & Ethnicity", 14, 20) %>%
   pack_rows("Comorbidites", 21, 21) %>%
-  pack_rows("Hospital Course", 22, 22) %>%
-  pack_rows("Severity", 23, 25) %>%
-  pack_rows("Survival", 26, 28) %>%
-  pack_rows("Readmission", 29, 32)
+  pack_rows("Hospital Course", 22, 24) %>%
+  pack_rows("Survival", 25, 27) %>%
+  pack_rows("Readmission", 28, 31)
 ```
 
 ```{r fig.height=15, fig.width=11}
@@ -728,7 +723,7 @@ age_plot2
 ```
 
 
-```{r combine-plots fig.height=7, fig.width=9}
+```{r eval=FALSE, fig.height=7, fig.width=9, include=FALSE}
 demo_plot <- cowplot::plot_grid(gender_plot, age_plot, race_plot,
   ncol = 1,
   rel_heights = c(1, 1.1, 0.95)
