@@ -31,16 +31,6 @@ result_table <- results %>%
          "Estimate" = Estimate.)
 ```
 
-Format p-values
-
-```{r}
-result_table <- result_table %>% 
-  mutate(`P-value` = if_else(p.value < 0.05 & p.value >= 0.001, round(p.value, 2), p.value),
-         `P-value` = if_else(p.value >= 0.05, round(p.value, 2), `P-value`),
-         sig = if_else(`P-value` < 0.001, 1, 0),
-         `P-value` = as.character(`P-value`),
-         `P-value` = if_else(sig == 1, "<.001", `P-value`))
-```
 
 Rename factors
 
@@ -56,17 +46,16 @@ Clean up table
 
 ```{r}
 result_table <- result_table %>% 
-  select(-sig) %>% 
   rename("Hazard Ratio" = Estimate, 
          "Neuro Status" = Neuro) %>% 
-  select(Analysis, `Neuro Status`, `Hazard Ratio`, p.value, `P-value`, everything())
+  select(Analysis, `Neuro Status`, `Hazard Ratio`, p.value, P.value, everything())
 ```
 
 Save manuscript table
 
 ```{r}
 manuscript_table <- result_table %>% 
-  select(Analysis, `Neuro Status`, `Hazard Ratio`, `P-value`) %>% 
+  select(Analysis, `Neuro Status`, `Hazard Ratio`, P.value) %>% 
   arrange(desc(Analysis))
 
 write.csv(manuscript_table, "meta_tables/Manuscript_Table.csv", row.names = FALSE)
