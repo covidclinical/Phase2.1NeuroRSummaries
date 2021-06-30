@@ -1,6 +1,6 @@
 
 ---
-title: "Metaanalysis of survival"
+title: "Meta-Analysis"
 output: html_document
 ---
 
@@ -28,21 +28,39 @@ site_google_url <- "https://docs.google.com/spreadsheets/d/1epcYNd_0jCUMktOHf8mz
 site_params <- googlesheets4::read_sheet(site_google_url, sheet = 1)
 site_avails <- googlesheets4::read_sheet(site_google_url, sheet = 2)
 sorted_sites <- site_avails %>%
-   filter(new_received == "Y") %>% # , is.na(excluded)) %>%
+   filter(new_received == "Y") %>%
    pull(siteid)
 ```
 
-change ```neuro_chr_to_analyze``` in order to change analysis to 'neuro_postCentral', neuro_postPeripheral', 'neuro_postBoth'
+Exclude APHP
 
 ```{r}
+sorted_sites <- sorted_sites[!sorted_sites %in% c("APHP")]
+```
+
+
+change ```neuro_chr_to_analyze``` in order to change analysis to 'neuro_postCentral', 'neuro_postPeripheral', 'neuro_postBoth'
+change ```neuro_type_analyze``` in order to change analysis to 'cpns_results' or 'binary_results'
+
+```{r}
+neuro_chr_to_analyze <- "neuro_postBoth"
+neuro_type_analyze <- "binary_results"
+
+if(neuro_type_analyze == "binary_results") { 
+  neuro_chr_to_analyze <- ""
+} else {
+    neuro_type_analyze <- ""
+  }
+
+
 sorted_sites <- paste(sorted_sites, "results", sep = "_")
 site_results <- mget(ls(pattern = "result"))
 site_results <- site_results[sorted_sites]
-neuro_chr_to_analyze <- "neuro_postBoth"
+
 get_life_row <- function(df,
                          outcome = "time_severe_reg_elix",
                          period = "first_hosp_results",
-                         neuro_type = "cpns_results") {
+                         neuro_type = neuro_type_analyze) {
   life_output <- df[[c(period, neuro_type, outcome, "life")]]
   bind_cols(life_output[c("surv", "std.err", "time", "strata")]) %>%
     mutate(
@@ -54,7 +72,7 @@ get_life_row <- function(df,
 get_cox_row <- function(df,
                         outcome = "time_severe_reg_elix",
                         period = "first_hosp_results",
-                        neuro_type = "cpns_results") {
+                        neuro_type = neuro_type_analyze) {
   cox_output <- df[[c(period, neuro_type, outcome, "cox")]]
   coefficients(cox_output) %>%
     data.frame() %>%
@@ -163,7 +181,7 @@ meta_surv_df %>%
   ) +
   coord_cartesian(clip = "off", ylim = c(0, 1), expand = FALSE) +
   guides(color = FALSE) +
-  theme_classic() +
+  theme_classic()
   # theme(plot.margin = margin(2, 50, 2, 2))+
   NULL
 ```
@@ -215,29 +233,37 @@ for (outcome_i in outcomes) {
     bind_rows() %>%
     mutate(outcome = outcome_i)
 }
-cox_results$time_deceased_reg_elix %>%
-  filter(variable == "neuro_postCentral") %>%
-  with(rma(yi = coef, sei = se.coef., method = "DL"))
-cox_results$time_severe_reg_elix %>%
-  filter(variable == "neuro_postCentral") %>%
-  with(rma(yi = coef, sei = se.coef., method = "DL"))
-cox_results$time_first_discharge_reg_elix %>%
-  filter(variable == "neuro_postCentral") %>%
-  with(rma(yi = coef, sei = se.coef., method = "DL"))
-cox_results$time_last_discharge_reg_elix %>%
-  filter(variable == "neuro_postCentral") %>%
-  with(rma(yi = coef, sei = se.coef., method = "DL"))
+# cox_results$time_deceased_reg_elix %>%
+#   filter(variable == "neuro_postCentral") %>%
+#   with(rma(yi = coef, sei = se.coef., method = "DL"))
+# cox_results$time_severe_reg_elix %>%
+#   filter(variable == "neuro_postCentral") %>%
+#   with(rma(yi = coef, sei = se.coef., method = "DL"))
+# cox_results$time_first_discharge_reg_elix %>%
+#   filter(variable == "neuro_postCentral") %>%
+#   with(rma(yi = coef, sei = se.coef., method = "DL"))
+# cox_results$time_last_discharge_reg_elix %>%
+#   filter(variable == "neuro_postCentral") %>%
+#   with(rma(yi = coef, sei = se.coef., method = "DL"))
 ```
 
 ## Random effects meta-analysis
 
 ```{r}
+if(neuro_type_analyze == "binary_results") {
+  variable_to_filter = "neuro_postneuro_cond"
+} else {
+  variable_to_filter = neuro_chr_to_analyze
+}
+
+
+
 for (outcome_i in outcomes) {
   meta_results[[outcome_i]] <-
     cox_results[[outcome_i]] %>% 
     bind_rows %>% 
     data.frame() %>% 
-    filter(variable == neuro_chr_to_analyze) %>% 
+    filter(variable == variable_to_filter) %>% 
     metagen(
       TE = coef,
       seTE = se.coef.,
@@ -293,6 +319,9 @@ We will convert our log(HR) to HR to facilitate interpretation and we will also 
 
 ```{r}
 combined_results <- combined_results %>%
+  group_by(analysis, studlab) %>% 
+  arrange(analysis, studlab) %>% 
+  ungroup() %>% 
   mutate_at(vars(TE:upper.tau2), ~ as.character(.) %>% as.numeric()) %>% 
   mutate_at(vars(TE:upper.predict, -pval.random, -Weight.random), ~ if_else(analysis == "time_deceased_reg_elix", exp(.),
                                               if_else(analysis == "time_severe_reg_elix", exp(.),
@@ -387,14 +416,10 @@ combined_results$CI.Low <- ifelse(is.na(combined_results$CI.Low), combined_resul
 # the below steps seem long but best way as of now to ensure that we can add < signs and asterisks when dealing with numeric and character data 
 combined_results <- combined_results %>% 
   mutate('Estimate ' = paste(Estimate, "(", CI.Low, ",", CI.High, ")"),
-         p.value_round = round(p.value, 5),
-         sig = if_else(p.value < 0.05, 1, 0),
-         p.value_format = ifelse(p.value_round < 0.00001, "< 0.00001", p.value_round),
-         p.value_format2 = sprintf("%.2f", p.value),
-         p.value_format = ifelse(p.value_format == "< 0.00001", p.value_format, p.value_format2),
-         `P-value` = if_else(sig == 1, paste(p.value_format, "*"), p.value_format),
-         `P-value` = if_else(`P-value` == "0.00 *", "< 0.05 *", `P-value`)) %>%
-  select(-p.value_round, -p.value_format, -p.value_format2, -sig) 
+         p.value_format = ifelse(p.value > 0.01, round(p.value, 2), round(p.value, 3)),
+         'P-value' = ifelse(p.value < 0.001, "< .001*", as.character(p.value_format)),
+         'P-value' = ifelse(p.value >= 0.001 & p.value < 0.05, paste(`P-value`, "*"), `P-value`)) %>% 
+  select(-p.value_format) 
 combined_results$p.value[combined_results$p.value == "NA"] <- ""
 combined_results[is.na(combined_results)] <- ""
 # make the second analysis row blank
@@ -413,7 +438,7 @@ combined_results <- combined_results %>%
 
 ```{r}
 results_table <- combined_results %>% 
-  select(Analysis, `Estimate `, Weight.random, p.value,
+  select(Analysis, `Estimate `, Weight.random, p.value, `P-value`,
          lower.predict, upper.predict,
          I2, lower.I2, upper.I2,
          H, lower.H, upper.H,
@@ -423,10 +448,10 @@ results_table <- combined_results %>%
          H.CI = paste("(", lower.H, ",", upper.H, ")"),
          tau2.CI = paste("(", lower.tau2, ",", upper.tau2, ")")) %>%
   select(-lower.predict, -upper.predict, -lower.I2, -upper.I2, -lower.H, -upper.H, -lower.tau2, -upper.tau2) %>% 
-  select(Analysis, `Estimate `, Weight.random, p.value, Predict.CI, I2, I2.CI, tau2, tau2.CI)
+  select(Analysis, `Estimate `, Weight.random, p.value, `P-value`, Predict.CI, I2, I2.CI, tau2, tau2.CI)
 results_table[results_table == "( NA , NA )"] <- ""
 results_table[is.na(results_table)] <- ""
-write.csv(results_table, file = paste0("meta_tables/surivival_analysis_", neuro_chr_to_analyze, ".csv"))
+write.csv(results_table, file = paste0("meta_tables/surivival_analysis_", neuro_type_analyze, neuro_chr_to_analyze, ".csv"))
 ```
 
 ## Results
@@ -434,7 +459,8 @@ write.csv(results_table, file = paste0("meta_tables/surivival_analysis_", neuro_
 Define a vector of invalid sites. As of now, ICSM and NUH, have such low counts that CIs and estimates are very high/low. To standardize the plots, we will want to abstract the min/max values while excluding any outlier sites like ICSM and NUH
 
 ```{r}
-invalid_sites <- sorted_sites[sorted_sites %in% c("NUH", "ICSM")]
+invalid_sites <- sorted_sites[sorted_sites %in% c("NUH_results", "ICSM_results")]
+invalid_sites <- gsub('_results', '', invalid_sites)
 # indent the sites to facilitate mapping with our combined_results df
 invalid_sites <- paste0("   ", invalid_sites)
 ```
@@ -459,7 +485,7 @@ scale_plot <- function(combined_results_df) {
 ```
 
 
-### Time to First Discharge
+### **Time to First Discharge**
 
 ```{r fig.width=8, message=FALSE, warning=FALSE}
 length_stay_first_results <- combined_results %>% 
@@ -485,10 +511,10 @@ forester(left_side_data = length_stay_first_results[1],
          xbreaks = c(scale$min_est, 1, scale$max_est),
          point_sizes = sizes,
          point_shapes = shapes,
-         file_path = here::here(paste0("figs/surivial_time_first_discharge", neuro_chr_to_analyze,".png")))
+         file_path = here::here(paste0("figs/surivial_time_first_discharge", neuro_type_analyze, neuro_chr_to_analyze,".png")))
 ```
 
-### Time to Last Discharge
+### **Time to Last Discharge**
 
 ```{r fig.width=8, message=FALSE, warning=FALSE}
 length_stay_last_results <- combined_results %>% 
@@ -514,10 +540,10 @@ forester(left_side_data = length_stay_last_results[1],
          xbreaks = c(scale$min_est, 1, scale$max_est),
          point_sizes = sizes,
          point_shapes = shapes,
-         file_path = here::here(paste0("figs/surivial_time_last_discharge", neuro_chr_to_analyze,".png")))
+         file_path = here::here(paste0("figs/surivial_time_last_discharge", neuro_type_analyze, neuro_chr_to_analyze,".png")))
 ```
 
-### Time to Severe COVID-19 
+### **Time to Severe COVID-19**
 
 ```{r fig.width=8, message=FALSE, warning=FALSE}
 time_severe_results <- combined_results %>% 
@@ -543,11 +569,11 @@ forester(left_side_data = time_severe_results[1],
          xbreaks = c(scale$min_est, 1, scale$max_est),
          point_sizes = sizes,
          point_shapes = shapes,
-         file_path = here::here(paste0("figs/surivial_time_to_severe", neuro_chr_to_analyze,".png")))
+         file_path = here::here(paste0("figs/surivial_time_to_severe", neuro_type_analyze, neuro_chr_to_analyze, ".png")))
 ```
 
 
-### Time to Mortality
+### **Time to Mortality**
 
 ```{r fig.width=8, message=FALSE, warning=FALSE}
 time_death_results <- combined_results %>% 
@@ -573,5 +599,5 @@ forester(left_side_data = time_death_results[1],
          xbreaks = c(scale$min_est, 1, scale$max_est),
          point_sizes = sizes,
          point_shapes = shapes,
-         file_path = here::here(paste0("figs/surivial_time_to_death", neuro_chr_to_analyze,".png")))
+         file_path = here::here(paste0("figs/surivial_time_to_death", neuro_type_analyze, neuro_chr_to_analyze,".png")))
 ```
