@@ -598,8 +598,10 @@ chi_result_table <- chi_result_table %>%
   mutate(sig_adj_pval = ifelse(P.value < pval_adj, 1, 0)) %>% 
   arrange(desc(X.squared)) %>%  
   left_join(., comorb_table_wide %>% 
-                                select(Comorbidity, None_Perc, Neuro_Perc), by = "Comorbidity") %>% 
-  select(Comorbidity, None_Perc, Neuro_Perc, everything()) %>% 
+                                select(Comorbidity, None_Total, None_Perc, Neuro_Total, Neuro_Perc), by = "Comorbidity") %>% 
+  mutate(None_Perc = paste(None_Total, "(", None_Perc, ")"),
+         Neuro_Perc = paste(Neuro_Total, "(", Neuro_Perc, ")")) %>% 
+  select(Comorbidity, None_Perc, Neuro_Perc, X.squared, P.value, sig_adj_pval) %>% 
   rename(No_Neuro_Perc = "None_Perc")
 
 write.csv(chi_result_table, "demo_results/chi_square_comorb_results.csv", row.names = FALSE)
