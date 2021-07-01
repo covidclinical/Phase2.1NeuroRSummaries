@@ -44,7 +44,7 @@ hypertension_combined <- comorbidity_code_table %>%
   sapply(., toString) %>%
   as.data.frame() %>%
   rename("ICD-10 Codes" = ".") %>%
-  mutate(Comorbidity = "Hypertension, combined") %>%
+  mutate(Comorbidity = "HTN, combined") %>%
   select(Comorbidity, `ICD-10 Codes`)
 
 diabetes_combined <- comorbidity_code_table %>%
@@ -54,7 +54,7 @@ diabetes_combined <- comorbidity_code_table %>%
   sapply(., toString) %>%
   as.data.frame() %>%
   rename("ICD-10 Codes" = ".") %>%
-  mutate(Comorbidity = "Diabetes") %>%
+  mutate(Comorbidity = "DM") %>%
   select(Comorbidity, `ICD-10 Codes`)
 
 comorbidity_code_table <- comorbidity_code_table %>%
@@ -67,13 +67,59 @@ comorb_names <- names(icd10_comorb_map)
 
 # add the weights
 # note that hypertension will need to be in the righ oft order ( I manually moved the weights by hand to end for Hypertension and diabetes)
-# note that each diabetes code has a weight (of 0), but I removed 1 - we should have 29 values
+# note that each diabetes code has a weight (of 0), but I removed 1
 van_walraven_weights <- c(7, 5, -1, 4, 2, 7, 6, 3, 0, 5, 11,
                           0, 0, 9, 12, 4, 0, 3, -4, 6, 5, -2, -2, 0, -7, 0, -3, 0, 0)
 
-length(weights)
+# should have 29 values
+length(van_walraven_weights)
 
 
 comorbidity_code_table <- comorbidity_code_table %>% cbind(van_walraven_weights)
+
+# add full names for comorbidities to replace abbreviations
+
+# this list was adaptaed from that in mappingNames.R provided by icd package
+comorbidity_full <- c(
+  "Congestive heart failure",
+  "Cardiac arrhythmias",
+  "Valvular disease",
+  "Pulmonary circulation disorders",
+  "Peripheral vascular disorders",
+  "Paralysis",
+  "Other neurological disorders",
+  "Chronic pulmonary disease",
+  "Hypothyroidism",
+  "Renal failure",
+  "Liver disease",
+  "Peptic ulcer disease excluding bleeding",
+  "HIV/AIDS",
+  "Lymphoma",
+  "Metastatic cancer",
+  "Solid tumor without metastasis",
+  "Rheumatoid arthritis/collagen vascular diseases",
+  "Coagulopathy",
+  "Obesity",
+  "Weight loss",
+  "Fluid and electrolye disorders",
+  "Blood loss anemia",
+  "Deficiency anemias",
+  "Alcohol abuse",
+  "Drug abuse",
+  "Psychoses",
+  "Depression",
+  "Diabetes",
+  "Hypertension"
+)
+
+comorbidity_code_table <- comorbidity_code_table %>%
+  cbind(comorbidity_full) %>%
+  arrange(comorbidity_full) %>%
+  select(comorbidity_full, `ICD-10 Codes`, van_walraven_weights) %>%
+  rename("Comorbidity" = comorbidity_full,
+         "Van Walraven Weights" = van_walraven_weights)
+
+
+
 
 write.csv(comorbidity_code_table, "tables/Table_Comorbidity_Mapping.csv", row.names = FALSE)
