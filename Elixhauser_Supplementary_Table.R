@@ -103,7 +103,7 @@ format_comorbs <- function(icd_comorb_map) {
     "Coagulopathy",
     "Obesity",
     "Weight loss",
-    "Fluid and electrolye disorders",
+    "Fluid and electrolyte disorders",
     "Blood loss anemia",
     "Deficiency anemias",
     "Alcohol abuse",
