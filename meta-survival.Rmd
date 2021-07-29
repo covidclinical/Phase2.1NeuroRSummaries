@@ -31,8 +31,9 @@ sorted_sites <- site_avails %>%
   filter(new_received == "Y") %>%
   pull(siteid) %>%
   paste("results", sep = "_")
-```
 
+sorted_sites <- c("NWU_results", "UPENN_results", "UPITT_results")
+```
 
 
 ```{r eval=FALSE, include=FALSE}
@@ -45,7 +46,7 @@ change ```neuro_chr_to_analyze``` in order to change analysis to 'neuro_postCent
 change ```neuro_type_analyze``` in order to change analysis to 'cpns_results' or 'binary_results'
 
 ```{r}
-neuro_chr_to_analyze <- "neuro_postBoth"
+neuro_chr_to_analyze <- "neuro_postCentral"
 # neuro_type_analyze <- "binary_results"
 neuro_type_analyze <- "cpns_results"
 
@@ -69,7 +70,7 @@ get_life_row <- function(df,
       n_site = df[[c(period, neuro_type, outcome, "cox", "n")]]
     )
 }
-# df = site_results[[1]]
+#df = site_results[[1]]
 get_cox_row <- function(df,
                         outcome = "time_severe_reg_elix",
                         period = "first_hosp_results",
@@ -78,8 +79,8 @@ get_cox_row <- function(df,
   coefficients(cox_output) %>%
     data.frame() %>%
     mutate(
-      site = df$site,
-      n_site = cox_output$n
+      site = df$site
+      #n_site = cox_output$n
     ) %>%
     rownames_to_column("variable")
 }
@@ -110,7 +111,8 @@ res_dat <- bind_rows(meta_results) %>%
   mutate(surv = if_else(is.na(surv) & time == 0, 1, surv)) %>%
   group_by(site, strata, outcome) %>%
   fill(surv, .direction = "down") %>%
-  fill(std.err, n_site, n_timepoints, .direction = "downup") %>%
+  fill(std.err, n_timepoints, .direction = "downup") %>%
+  #fill(std.err, n_site, n_timepoints, .direction = "downup") %>%
   filter(n_timepoints >= 5, time >= 0) %>%
   ungroup()
 ```
@@ -170,6 +172,7 @@ meta_surv_df <- res_dat %>%
       )
   )
 meta_surv_df %>%
+  filter(time <= 50) %>% 
   ggplot(aes(
     x = time, y = meta_surv,
     color = fct_reorder2(strata, outcome, meta_surv)
@@ -323,8 +326,20 @@ for (i in names(meta_results)) {
 
   ma_combine[[i]] <- df
 }
+
 combined_results <- do.call(rbind.data.frame, ma_combine)
 ```
+
+NUH has missing value for `time_to_last_disharge` - we will exclude
+
+```{r}
+if(neuro_chr_to_analyze == "neuro_postPeripheral") { 
+  
+  combined_results <- combined_results %>% 
+    filter(!is.na(TE))
+  }
+```
+
 
 We will convert our log(HR) to HR to facilitate interpretation and we will also perform appropriate rounding and rename variables here
 
@@ -353,63 +368,76 @@ combined_results <- combined_results %>%
   )
 ```
 
-
 Add blank rows to facilitate formatting
 
 ```{r}
 df_new <- as.data.frame(lapply(combined_results, as.character), stringsAsFactors = FALSE)
-# add two blank rows
-combined_results <- head(do.call(rbind, by(df_new, combined_results$analysis, rbind, "", "")), -1)
-# add row to top row
+
+# add blank rows to facilitate formatting
 combined_results <- combined_results %>%
   add_row(.before = 1) %>%
-  add_row(.before = 1)
-# remove last row
-combined_results <- combined_results %>%
-  head(-1)
-# convert NA to blank rows
-combined_results[is.na(combined_results)] <- ""
+  add_row(.after = nrow(df_new %>% filter(analysis == "time_deceased_reg_elix"))+1) %>% # determine number by the number of sites + 1 
+  add_row(.after = nrow(df_new %>% filter(analysis == "time_deceased_reg_elix"))+5) %>% add_row(.after = nrow(df_new %>% filter(analysis == "time_deceased_reg_elix"))+9) %>% 
+  add_row(.after = nrow(.))
+
+combined_results <- combined_results %>% 
+  fill(analysis, .direction = "up") %>%
+  add_row(.after = nrow(df_new %>% filter(analysis == "time_deceased_reg_elix"))+1) %>% # determine number by the number of sites + 1 
+  add_row(.after = nrow(df_new %>% filter(analysis == "time_deceased_reg_elix"))+6) %>% add_row(.after = nrow(df_new %>% filter(analysis == "time_deceased_reg_elix"))+11)
+```
+
+Add row names to facilitate future subset by analysis
+
+```{r}
+combined_results <- combined_results %>% data.frame()
+
+# create temp analysis column
+combined_results <- combined_results %>% 
+  mutate(analysis_temp = analysis) %>% 
+  fill(analysis_temp, .direction = "down")
+
+combined_results$row_num <- seq_len(nrow(combined_results))
+combined_results <- combined_results %>% mutate(new_row = paste0(analysis_temp, "_", row_num))
+
+row.names(combined_results) <- combined_results$new_row
+combined_results <- combined_results %>% select(-row_num, -new_row, -analysis_temp)
 ```
 
 Carry over name of the analysis to the blank row
 
 ```{r}
-# first convert blank spaces to NA
-combined_results[combined_results == ""] <- NA
-# Add the analysis labels to the original site level rows - these will be our labels for the forest plots
-combined_results <- combined_results %>%
-  fill(analysis, .direction = "up") %>%
-  mutate(
-    id = seq_len(nrow(.)),
-    Site = if_else(is.na(Site), analysis, Site),
-    lag_Site = lag(Site),
-    lag_Site = if_else(is.na(lag_Site), "First", lag_Site),
-    Site = ifelse(Site == lag_Site, paste(Site, "_", id), Site)
-  ) %>%
-  select(-analysis, -lag_Site, -id) %>%
-  rename("Analysis" = Site)
+# # Add the analysis labels to the original site level rows - these will be our labels for the forest plots
+# combined_resultsx <- combined_results %>%
+#   fill(analysis, .direction = "up") %>%
+#   mutate(
+#     id = seq_len(nrow(.)),
+#     Site = if_else(is.na(Site), analysis, Site),
+#     lag_Site = lag(Site),
+#     lag_Site = if_else(is.na(lag_Site), "First", lag_Site),
+#     Site = ifelse(Site == lag_Site, paste(Site, "_", id), Site)
+#   ) %>%
+#   select(-analysis, -lag_Site, -id) %>%
+#   rename("Analysis" = Site)
 ```
 
-Indent site results
+Indent site results and create a new Analysis column to be our forest plot labels
 
 ```{r}
 # convert columns back to numeric
 combined_results <- combined_results %>%
   mutate_at(vars(Estimate:upper.tau2), ~ as.character(.) %>% as.numeric())
+
 combined_results$Analysis <- ifelse(is.na(combined_results$Estimate),
-  combined_results$Analysis,
-  paste0("   ", combined_results$Analysis)
+  combined_results$analysis,
+  paste0("   ", combined_results$Site)
 )
 ```
 
-Change row names to make it easier to subset the data by analysis for the forest plots
+make the new Analysis label blank if not representing the site
 
 ```{r}
-rownames(combined_results) <- ifelse(is.na(combined_results$Estimate),
-  paste(combined_results$Analysis),
-  rownames(combined_results)
-)
-# make the secondary analysis label blank
+combined_results <- combined_results %>% data.frame()
+
 combined_results <- combined_results %>%
   mutate(Analysis = ifelse(grepl("_", Analysis), NA, Analysis))
 ```
@@ -425,14 +453,21 @@ overall_results <- c(
 )
 # fill these columns up to the first overall meta-analysis results row where there are currently NAs
 combined_results <- combined_results %>%
-  fill(overall_results, .direction = "up")
+  fill(overall_results, .direction = "down")
+
 # subsequently, make the site level information NA for the following columns
 combined_results <- combined_results %>%
   mutate_at(vars(overall_results), ~ ifelse(is.na(Estimate), .x, NA))
+
+# make sure the empty row at the start of each analysis is empty
+combined_results <- combined_results %>% 
+  mutate_at(vars(overall_results), ~ ifelse(!is.na(analysis) & is.na(Site), NA, .x ))
+
 # move meta analysis results to the same columns as the site regression estimates
 combined_results$Estimate <- ifelse(is.na(combined_results$Estimate), combined_results$TE.random, combined_results$Estimate)
 combined_results$CI.High <- ifelse(is.na(combined_results$CI.High), combined_results$upper.random, combined_results$CI.High)
 combined_results$CI.Low <- ifelse(is.na(combined_results$CI.Low), combined_results$lower.random, combined_results$CI.Low)
+
 # create new 'Estimate' column that we can append CIs
 # format the p-values so we don't lose trailing zeros which occurs with as.character()
 # the below steps seem long but best way as of now to ensure that we can add < signs and asterisks when dealing with numeric and character data
@@ -444,6 +479,7 @@ combined_results <- combined_results %>%
     "P-value" = ifelse(p.value >= 0.001 & p.value < 0.05, paste(`P-value`, "*"), `P-value`)
   ) %>%
   select(-p.value_format)
+
 combined_results$p.value[combined_results$p.value == "NA"] <- ""
 combined_results[is.na(combined_results)] <- ""
 # make the second analysis row blank
@@ -526,12 +562,13 @@ length_stay_first_results <- combined_results %>%
 ## define forest plot shapes
 # shape #16 is normal circle; #18 is diamond
 shapes <- rep(16, times = nrow(length_stay_first_results))
-shapes[1] <- 18
+shapes[length(shapes)] <- 18
 sizes <- rep(3.25, times = nrow(length_stay_first_results))
-sizes[1] <- 5
+sizes[length(sizes)] <- 5
 scale <- scale_plot(length_stay_first_results)
+
 forester(
-  left_side_data = length_stay_first_results[1],
+  left_side_data = length_stay_first_results %>% select(Analysis),
   estimate = length_stay_first_results$Estimate,
   ci_low = length_stay_first_results$CI.Low,
   ci_high = length_stay_first_results$CI.High,
@@ -557,12 +594,12 @@ length_stay_last_results <- combined_results %>%
 ## define forest plot shapes
 # shape #16 is normal circle; #18 is diamond
 shapes <- rep(16, times = nrow(length_stay_last_results))
-shapes[1] <- 18
+shapes[length(shapes)] <- 18
 sizes <- rep(3.25, times = nrow(length_stay_last_results))
-sizes[1] <- 5
+sizes[length(sizes)] <- 5
 scale <- scale_plot(length_stay_last_results)
 forester(
-  left_side_data = length_stay_last_results[1],
+  left_side_data = length_stay_last_results %>% select(Analysis),
   estimate = length_stay_last_results$Estimate,
   ci_low = length_stay_last_results$CI.Low,
   ci_high = length_stay_last_results$CI.High,
@@ -588,12 +625,12 @@ time_severe_results <- combined_results %>%
 ## define forest plot shapes
 # shape #16 is normal circle; #18 is diamond
 shapes <- rep(16, times = nrow(time_severe_results))
-shapes[1] <- 18
+shapes[length(shapes)] <- 18
 sizes <- rep(3.25, times = nrow(time_severe_results))
-sizes[1] <- 5
+sizes[length(sizes)] <- 5
 scale <- scale_plot(time_severe_results)
 forester(
-  left_side_data = time_severe_results[1],
+  left_side_data = time_severe_results %>% select(Analysis),
   estimate = time_severe_results$Estimate,
   ci_low = time_severe_results$CI.Low,
   ci_high = time_severe_results$CI.High,
@@ -620,12 +657,12 @@ time_death_results <- combined_results %>%
 ## define forest plot shapes
 # shape #16 is normal circle; #18 is diamond
 shapes <- rep(16, times = nrow(time_death_results))
-shapes[1] <- 18
+shapes[length(shapes)] <- 18
 sizes <- rep(3.25, times = nrow(time_death_results))
-sizes[1] <- 5
+sizes[length(sizes)] <- 5
 scale <- scale_plot(time_death_results)
 forester(
-  left_side_data = time_death_results[1],
+  left_side_data = time_death_results %>% select(Analysis),
   estimate = time_death_results$Estimate,
   ci_low = time_death_results$CI.Low,
   ci_high = time_death_results$CI.High,
