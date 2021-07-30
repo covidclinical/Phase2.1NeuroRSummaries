@@ -46,7 +46,7 @@ change ```neuro_chr_to_analyze``` in order to change analysis to 'neuro_postCent
 change ```neuro_type_analyze``` in order to change analysis to 'cpns_results' or 'binary_results'
 
 ```{r}
-neuro_chr_to_analyze <- "neuro_postCentral"
+neuro_chr_to_analyze <- "neuro_postBoth"
 # neuro_type_analyze <- "binary_results"
 neuro_type_analyze <- "cpns_results"
 
@@ -520,6 +520,14 @@ results_table[results_table == "( NA , NA )"] <- ""
 results_table[is.na(results_table)] <- ""
 write.csv(results_table, file = paste0("meta_tables/surivival_analysis_", neuro_type_analyze, neuro_chr_to_analyze, ".csv"))
 ```
+
+Add 'overall effect' labels for forest plots
+
+```{r}
+combined_results <- combined_results %>% 
+  mutate(Analysis = if_else(Analysis == "" & !is.na(Estimate), "Overall Estimate", Site))
+```
+
 
 ## Results
 
