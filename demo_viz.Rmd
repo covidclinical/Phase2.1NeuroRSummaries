@@ -49,10 +49,11 @@ sites_wo_race <- site_params %>%
 results <- paste(sorted_sites, "results", sep = "_")
 ```
 
-Exclude APHP
 
 ```{r}
-results <- results[!results %in% c("APHP_results")]
+results <- results[results %in% c("NWU_results", "UPENN_results", "UPITT_results",
+                  "VA1_results", "VA2_results", "VA3_results", 
+                  "VA4_results", "VA5_results", "MGB_results")]
 ```
 
 ## Demographic Data
@@ -123,7 +124,7 @@ combined_other_table_wide <- bind_rows(other_table_list) %>%
 ```{r fig.height=10}
 medians_df <- combined_other_table_wide %>%
   filter(grepl("Median", name)) %>%
-  pivot_longer(None:Both, names_to = "neuro_type") %>%
+  pivot_longer(None:Central, names_to = "neuro_type") %>%
   replace_na(list(value = "0 [0, 0]")) %>%
   mutate(
     median_val = as.numeric(gsub(" \\[[^()]*\\]", "", value)),
@@ -158,7 +159,7 @@ medians_df %>%
 alpha_threshold <- qnorm(0.975)
 means_df <- combined_other_table_wide %>%
   filter(grepl("Mean", name)) %>%
-  pivot_longer(None:Both, names_to = "neuro_type") %>%
+  pivot_longer(None:Central, names_to = "neuro_type") %>%
   replace_na(list(value = "0 (0)")) %>%
   mutate(
     mean_val = as.numeric(gsub(" \\([^()]*\\)", "", value)),
@@ -194,10 +195,9 @@ for (i in vars_to_process) {
       site = toupper(site),
       None = sub("(\\(.*|\\[.*)", "", None),
       Peripheral = sub("(\\(.*|\\[.*)", "", Peripheral),
-      Central = sub("(\\(.*|\\[.*)", "", Central),
-      Both = sub("(\\(.*|\\[.*)", "", Both)
+      Central = sub("(\\(.*|\\[.*)", "", Central)
     ) %>%
-    mutate(across(None:Both, as.numeric)) %>%
+    mutate(across(None:Central, as.numeric)) %>%
     as_tibble() %>%
     select(-site, -var) %>%
     summarise_all(list(
@@ -223,10 +223,9 @@ other_table_compiled <- bind_rows(processed_list, .id = "Table 1") %>%
     None = glue("{None_mean} [{None_min}, {None_max}]"),
     Peripheral = glue("{Peripheral_mean} [{Peripheral_min}, {Peripheral_max}]"),
     Central = glue("{Central_mean} [{Central_min}, {Central_max}]"),
-    Both = glue("{Both_mean} [{Both_min}, {Both_max}]"),
     N = NA
   ) %>%
-  select(`Table 1`, N, None, Peripheral, Central, Both)
+  select(`Table 1`, N, None, Peripheral, Central)
 ```
 
 ```{r}
@@ -239,10 +238,9 @@ for (i in vars_to_process) {
       site = toupper(site),
       None = sub("(\\(.*|\\[.*)", "", None),
       Peripheral = sub("(\\(.*|\\[.*)", "", Peripheral),
-      Central = sub("(\\(.*|\\[.*)", "", Central),
-      Both = sub("(\\(.*|\\[.*)", "", Both)
+      Central = sub("(\\(.*|\\[.*)", "", Central)
     ) %>%
-    mutate(across(None:Both, as.numeric))
+    mutate(across(None:Central, as.numeric))
 
   processed_list_figs[[i]] <- mod_table
 }
@@ -259,10 +257,10 @@ other_table_for_figs %>%
     grouped_var = gsub("Mean |Median | \\[Min, Max\\]| \\(SD\\)", "", var)
   ) %>%
   pivot_longer(
-    cols = None:Both,
+    cols = None:Central,
     names_to = "type"
   ) %>%
-  mutate(type = factor(type, levels = c("None", "Central", "Peripheral", "Both"))) %>%
+  mutate(type = factor(type, levels = c("None", "Central", "Peripheral"))) %>%
   ggplot(aes(y = value, x = type, fill = site)) +
   facet_grid(vars(grouped_var), vars(me), scales = "free") +
   geom_bar(stat = "identity", position = "dodge", colour = "black") +
@@ -362,19 +360,18 @@ tableOne_compiled <- tableOne_raw %>%
 kbl(tableOne_compiled) %>%
   add_header_above(c(
     " ",
-    "",
     "No Neurological Disease" = 1,
     "Neurological Disease" = 3
   )) %>%
   kable_paper("striped", full_width = F) %>%
   pack_rows("Sex", 2, 3) %>%
-  pack_rows("Age", 4, 13) %>%
-  pack_rows("Race & Ethnicity", 14, 20) %>%
-  pack_rows("Past Medical History", 21, 21) %>%
-  pack_rows("Length of Stay", 22, 23) %>%
-  pack_rows("Severity", 24, 26) %>%
-  pack_rows("Survival", 27, 29) %>%
-  pack_rows("Readmission", 30, 32)
+  pack_rows("Age", 4, 12) %>%
+  pack_rows("Race & Ethnicity", 13, 19) %>%
+  pack_rows("Past Medical History", 20, 20) %>%
+  pack_rows("Length of Stay", 21, 22) %>%
+  pack_rows("Severity", 23, 25) %>%
+  pack_rows("Survival", 26, 28) %>%
+  pack_rows("Readmission", 29, 32)
 
 write.csv(tableOne_compiled, "demo_results/Table1.csv", row.names = FALSE)
 ```
@@ -388,7 +385,7 @@ combined_table <- combined_table_wide %>%
   ) %>%
   replace_na(list(Count = 0)) %>%
   mutate(Dx = gsub("n_var_", "", Dx) %>%
-    fct_relevel(c("None", "Central", "Peripheral", "Both")))
+    fct_relevel(c("None", "Central", "Peripheral")))
 ```
 
 ### Diagnoses
@@ -465,6 +462,18 @@ datatable(diag_counts)
 write.csv(diag_counts, "demo_results/neuro_codes_table.csv", row.names = FALSE)
 ```
 
+### Top Central ICD Codes
+
+```{r}
+datatable(diag_counts %>% filter(pns_cns == "Central") %>% head(5))
+```
+
+### Top Peripheral ICD Codes
+
+```{r}
+datatable(diag_counts %>% filter(pns_cns == "Peripheral") %>% head(5))
+```
+
 ### Comordities
 
 Stratified by CPNS Diseases
@@ -485,7 +494,7 @@ for (i in results) {
   comorb_table_list[[i]] <- tmp_comorb %>%
     filter(!Comorbidity == "Diabetes, uncomplicated") %>% 
     mutate(Comorbidity = if_else(Comorbidity == "Diabetes, complicated", "Diabetes", Comorbidity)) %>% 
-    select(site, Comorbidity,  n_Total, n_None, n_Central, n_Peripheral, n_Both)
+    select(site, Comorbidity,  n_Total, n_None, n_Central, n_Peripheral)
 }
 comorb_table_wide <- bind_rows(comorb_table_list) %>% 
   data.frame() %>% 
@@ -499,14 +508,11 @@ comorb_table_wide <- bind_rows(comorb_table_list) %>%
          CNS_Perc = round(CNS_Total/as.numeric(gsub( " .*$", "", tableOne_compiled[1,5]))*100, 1),
          PNS_Total = sum(n_Peripheral, na.rm = TRUE),
          PNS_Perc = round(PNS_Total/as.numeric(gsub( " .*$", "", tableOne_compiled[1,4]))*100, 1),
-         Both_Total = sum(n_Both, na.rm = TRUE),
-         Both_Perc = round(Both_Total/as.numeric(gsub( " .*$", "", tableOne_compiled[1,6]))*100, 1),
          Comorb_Total = paste(Comorb_Total, "(", Comorb_Perc, ")"),
          None_Total = paste(None_Total, "(", None_Perc, ")"),
          CNS_Total = paste(CNS_Total, "(", CNS_Perc, ")"),
-         PNS_Total = paste(PNS_Total, "(", PNS_Perc, ")"),
-         Both_Total = paste(Both_Total, "(", Both_Perc, ")")) %>% 
-  distinct(Comorbidity, Comorb_Total, None_Total, CNS_Total, PNS_Total, Both_Total) %>% 
+         PNS_Total = paste(PNS_Total, "(", PNS_Perc, ")")) %>% 
+  distinct(Comorbidity, Comorb_Total, None_Total, CNS_Total, PNS_Total) %>% 
   ungroup()
 
 datatable(comorb_table_wide)
@@ -523,10 +529,9 @@ comorb_table_list <- list()
 # sum of all neuro patients
 cns_n = as.numeric(gsub( " .*$", "", tableOne_compiled[1,5]))
 pns_n = as.numeric(gsub( " .*$", "", tableOne_compiled[1,4]))
-both_n = as.numeric(gsub( " .*$", "", tableOne_compiled[1,6]))
 
-neuro_n = sum(cns_n, pns_n, both_n)
-patients_n = as.numeric(gsub( " .*$", "", tableOne_compiled[1,3]))
+neuro_n = sum(cns_n, pns_n)
+patients_none = as.numeric(gsub( " .*$", "", tableOne_compiled[1,3]))
 
 for (i in results) {
   tmp <- get(i)
@@ -541,13 +546,13 @@ for (i in results) {
     mutate(Comorbidity = if_else(Comorbidity == "Diabetes, complicated", "Diabetes", Comorbidity)) %>% 
     select(site, Comorbidity,  n_Total, n_no_neuro_cond, n_neuro_cond)
 }
-comorb_table_wide <- bind_rows(comorb_table_list) %>% 
+comorb_table_wide_binary <- bind_rows(comorb_table_list) %>% 
   data.frame() %>% 
   group_by(Comorbidity) %>% 
   mutate(Comorb_Total = sum(n_Total, na.rm = TRUE),
          Comorb_Perc = round(Comorb_Total/as.numeric(tableOne_compiled[1,2])*100, 1),
          None_Total = sum(n_no_neuro_cond, na.rm = TRUE),
-         None_Perc = round(None_Total/patients_n*100, 1),
+         None_Perc = round(None_Total/patients_none*100, 1),
          Neuro_Total = sum(n_neuro_cond, na.rm = TRUE),
          Neuro_Perc = round(Neuro_Total/neuro_n*100, 1)) %>% 
   distinct(Comorbidity, Comorb_Total, Comorb_Perc, None_Total, None_Perc, Neuro_Total, Neuro_Perc) %>% 
@@ -557,27 +562,27 @@ comorb_table_wide <- bind_rows(comorb_table_list) %>%
 
 
 
-datatable(comorb_table_wide)
+datatable(comorb_table_wide_binary)
 
-write.csv(comorb_table_wide, "demo_results/comorbidity_table.csv", row.names = FALSE)
+write.csv(comorb_table_wide_binary, "demo_results/comorbidity_table.csv", row.names = FALSE)
 
 ```
 
 **Chi-square analysis**
 
 ```{r}
-list_of_comorbs <- comorb_table_wide$Comorbidity
+list_of_comorbs <- comorb_table_wide_binary$Comorbidity
 
 chi_result_list <- list()
 
 for (i in list_of_comorbs) {
   
-  comorb <- comorb_table_wide %>% filter(Comorbidity == paste(i))
+  comorb <- comorb_table_wide_binary %>% filter(Comorbidity == paste(i))
   
   build_mat <- comorb %>% 
     select(None_Total, Neuro_Total) %>% 
     mutate(NoNeuro_Comorb = neuro_n - Neuro_Total,
-           NoNone_Comorb = patients_n - None_Total) %>% 
+           NoNone_Comorb = patients_none - None_Total) %>% 
     select(Neuro_Total, NoNeuro_Comorb, None_Total, NoNone_Comorb) %>% 
     as.character()
   
@@ -597,16 +602,16 @@ chi_result_table <- bind_rows(chi_result_list)
 
 Significance when correcting for Bonferroni
 
-p-value = 0.05/(29 comorbs (we collapsed two diabetes into one) + 4 meta-analyses)
+p-value = 0.05/(29 comorbs (we collapsed two diabetes into one) 
 
 ```{r}
-pval_adj = 0.05/33
+pval_adj = 0.05/29
 pval_adj
 
 chi_result_table <- chi_result_table %>% 
   mutate(sig_adj_pval = ifelse(P.value < pval_adj, 1, 0)) %>% 
   arrange(desc(X.squared)) %>%  
-  left_join(., comorb_table_wide %>% 
+  left_join(., comorb_table_wide_binary %>% 
                                 select(Comorbidity, None_Total, None_Perc, Neuro_Total, Neuro_Perc), by = "Comorbidity") %>% 
   mutate(None_Perc = paste(None_Total, "(", None_Perc, ")"),
          Neuro_Perc = paste(Neuro_Total, "(", Neuro_Perc, ")")) %>% 
@@ -616,6 +621,102 @@ chi_result_table <- chi_result_table %>%
 write.csv(chi_result_table, "demo_results/chi_square_comorb_results.csv", row.names = FALSE)
 ```
 
+### CNS vs PNS vs None Analysis
+
+```{r}
+comorb_table_list <- list()
+
+
+for (i in results) {
+  tmp <- get(i)
+  tmp_comorb <- tmp[[c(
+    "first_hosp_results",
+    "cpns_results",
+    "elix_obfus_table1"
+  )]]
+  tmp_comorb$site <- tmp[["site"]]
+  comorb_table_list[[i]] <- tmp_comorb %>%
+    filter(!Comorbidity == "Diabetes, uncomplicated") %>% 
+    mutate(Comorbidity = if_else(Comorbidity == "Diabetes, complicated", "Diabetes", Comorbidity)) %>% 
+    select(site, Comorbidity,  n_Total, n_None, n_Peripheral, n_Central)
+}
+comorb_table_wide_stratified <- bind_rows(comorb_table_list) %>% 
+  data.frame() %>% 
+  group_by(Comorbidity) %>% 
+  mutate(Comorb_Total = sum(n_Total, na.rm = TRUE),
+         Comorb_Perc = round(Comorb_Total/as.numeric(tableOne_compiled[1,2])*100, 1),
+         None_Total = sum(n_None, na.rm = TRUE),
+         None_Perc = round(None_Total/patients_none*100, 1),
+         CNS_Total = sum(n_Central, na.rm = TRUE),
+         CNS_Perc = round(CNS_Total/cns_n*100, 1),
+         PNS_Total = sum(n_Peripheral, na.rm = TRUE),
+         PNS_Perc = round(PNS_Total/pns_n*100, 1)) %>% 
+  distinct(Comorbidity, Comorb_Total, Comorb_Perc, None_Total, None_Perc, CNS_Total, CNS_Perc, PNS_Total, PNS_Perc) %>% 
+  select(Comorbidity, Comorb_Total, Comorb_Perc, None_Total, None_Perc, CNS_Total, CNS_Perc, PNS_Total, PNS_Perc) %>% 
+  arrange(desc(Comorb_Perc)) %>% 
+  ungroup()
+
+
+
+datatable(comorb_table_wide_stratified)
+
+write.csv(comorb_table_wide_stratified, "demo_results/comorbidity_table_statified.csv", row.names = FALSE)
+```
+
+**Chi-square analysis**
+
+```{r}
+list_of_comorbs <- comorb_table_wide_stratified$Comorbidity
+
+chi_result_list <- list()
+
+for (i in list_of_comorbs) {
+  
+  comorb <- comorb_table_wide_stratified %>% filter(Comorbidity == paste(i))
+  
+  build_mat <- comorb %>% 
+    select(None_Total, CNS_Total, PNS_Total) %>% 
+    mutate(NoCNS_Comorb = cns_n - CNS_Total, 
+           NoPNS_Comorb = pns_n - PNS_Total,
+           NoNone_Comorb = patients_none - None_Total) %>% 
+    select(None_Total, NoNone_Comorb, CNS_Total, NoCNS_Comorb, PNS_Total, NoPNS_Comorb) %>% 
+    as.character()
+  
+  mat <- matrix(as.numeric(build_mat), nrow = 2, ncol = 3)
+  chi_result <- chisq.test(mat,correct=FALSE) # Yate's correction may make more of a different with smaller sample size - no large differences appearant when I compared results
+  
+  pval <- chi_result$p.value 
+  x2 <- chi_result$statistic
+  chi_results <- data.frame("Comorbidity" = paste(i), "X-squared" = x2, "P-value" = pval)
+  
+  chi_result_list[[i]] <- chi_results
+  
+}
+
+chi_result_table <- bind_rows(chi_result_list)
+```
+
+Significance when correcting for Bonferroni
+
+p-value = 0.05/(29 comorbs (we collapsed two diabetes into one) 
+
+```{r}
+pval_adj = 0.05/29
+pval_adj
+
+chi_result_table <- chi_result_table %>% 
+  mutate(sig_adj_pval = ifelse(P.value < pval_adj, 1, 0)) %>% 
+  arrange(desc(X.squared)) %>%  
+  left_join(., comorb_table_wide_stratified %>% 
+                                select(Comorbidity, None_Total, None_Perc, CNS_Total, CNS_Perc, PNS_Total, PNS_Perc), by = "Comorbidity") %>% 
+  mutate(None_Perc = paste(None_Total, "(", None_Perc, ")"),
+         CNS_Perc = paste(CNS_Total, "(", CNS_Perc, ")"),
+         PNS_Perc = paste(PNS_Total, "(", PNS_Perc, ")")) %>% 
+  select(Comorbidity, None_Perc, CNS_Perc, PNS_Perc, X.squared, P.value, sig_adj_pval) %>% 
+  rename(No_Neuro_Perc = "None_Perc")
+
+write.csv(chi_result_table, "demo_results/chi_square_comorb_stratified_results.csv", row.names = FALSE)
+```
 
 ## Figures
 
