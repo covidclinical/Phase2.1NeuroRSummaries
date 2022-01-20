@@ -42,10 +42,6 @@ sorted_sites <- site_avails %>%
 ```{r}
 site_results <- mget(ls(pattern = "results"))
 site_results <- site_results[sorted_sites]
-
-site_results[['NUH_results']] <- NULL
-site_results[['BCH_results']] <- NULL
-site_results[['GOSH_results']] <- NULL
 ```
 
 
@@ -192,7 +188,7 @@ group.colors <- c(NNC = "darkgray", PNS = "slateblue", CNS ="tomato")
 site_names <- names(site_results) %>% 
   gsub("_results", "", .)
 
-pdf(file="survival_curves.pdf")  
+pdf(file="manuscript/figures/site_level_survival_curves.pdf", height = 4, width = 6)  
 
 for(i in site_names) {
   
@@ -215,7 +211,7 @@ for(i in site_names) {
     scale_colour_manual(values = group.colors) + 
     coord_cartesian(clip = "off", ylim = c(0, 1), expand = FALSE) +
     xlab("Time (days)") + 
-    ylab("Survival Probability") + 
+    ylab("Event Probability") + 
     theme_classic() + 
     theme(legend.text=element_text(size=11)) + 
     guides(colour = guide_legend(override.aes = list(size=2)))
@@ -228,6 +224,21 @@ for(i in site_names) {
 dev.off()
 
 ```
+
+## Remove sites excluded from meta-analysis
+
+```{r}
+# site_results[['NUH_results']] <- NULL
+# site_results[['BCH_results']] <- NULL
+# site_results[['GOSH_results']] <- NULL
+
+res_dat_surv <- res_dat_surv %>% 
+  filter(!site %in% c("NUH", "BCH", "GOSH"))
+
+nrow(data.frame(unique(res_dat_surv$site)))
+```
+
+
 
 ### Weight each site 
 
@@ -315,7 +326,7 @@ test = meta_surv_df %>%
          ci_u = exp(-exp(log(-log(meta_surv)) - zval*se_lt_hat)))
 
 
-surv_curves <- test %>%
+surv_curves <- meta_surv_df %>%
   filter(time <= 60) %>% 
   ggplot(aes(
     x = time, y = meta_surv,
@@ -324,7 +335,7 @@ surv_curves <- test %>%
   )) +
   geom_line(aes()) +
   #geom_ribbon(aes(ymin = ymin, ymax = ymax), alpha = 0.1, linetype = 2) +
-  geom_ribbon(aes(ymin = ci_l, ymax = ci_u, fill = strata), alpha = 0.2, linetype = 0, show.legend = FALSE) + 
+  #geom_ribbon(aes(ymin = ci_l, ymax = ci_u, fill = strata), alpha = 0.2, linetype = 0, show.legend = FALSE) + 
   #geom_ribbon(aes(ymin = ci.lb, ymax = ci.ub), alpha = 0.3, linetype = 0) + 
   labs(color = NULL, y = NULL) +
   scale_colour_manual(values = group.colors) + 

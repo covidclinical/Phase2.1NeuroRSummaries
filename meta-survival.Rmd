@@ -1,8 +1,9 @@
-
 ---
 title: "Meta-Analysis"
 output: html_document
 ---
+
+Perform primary meta-analysis on Cox-PH models from each site.
 
 ```{r message=FALSE, warning=FALSE}
 library(tidyverse)
@@ -21,19 +22,18 @@ for (rda in rdas) {
   load(rda)
 }
 rm(rdas, rda)
+
 # create a list of all rda files with "result" suffix
 # check for sites we may want to exclude
 googlesheets4::gs4_deauth()
 site_google_url <- "https://docs.google.com/spreadsheets/d/1epcYNd_0jCUMktOHf8mz5v651zy1JALD6PgzobrGWDY/edit?usp=sharing"
 site_params <- googlesheets4::read_sheet(site_google_url, sheet = 1)
 site_avails <- googlesheets4::read_sheet(site_google_url, sheet = 2)
+
 sorted_sites <- site_avails %>%
   filter(date_v3_received == 1) %>%
   pull(siteid) %>%
   paste("results", sep = "_")
-
-# sorted_sites <- c("NWU_results","UPITT_results", "MGB_results", "UPENN_results", 
-#                   "VA1_results", "VA2_results", "VA3_results", "VA4_results", "VA5_results") #"UPENN_results", "UPITT_results", "MGB_results", "FRBDX_results")
 ```
 
 
@@ -43,8 +43,17 @@ site_results <- mget(ls(pattern = "results"))
 
 
 ```{r echo=TRUE}
-sorted_sites <- sorted_sites[!(sorted_sites %in% c("BCH_results"))]
+sorted_sites <- sorted_sites[!(sorted_sites %in% c("NUH_results", "BCH_results", "GOSH_results"))]
+site_results[['NUH_results']] <- NULL
 site_results[['BCH_results']] <- NULL
+site_results[['GOSH_results']] <- NULL
+```
+
+*I received a lot of missing values and a warning: 'Ratio of largest to smallest sampling variance extremely large. May not be able to obtain stable results.' - when trying to run a meta-analysis on just the pediatric hospitals*
+
+```{r}
+# sorted_sites <- sorted_sites[(sorted_sites %in% c("BCH_results", "GOSH_results"))]
+# site_results <- site_results[c("BCH_results", "GOSH_results")]
 ```
 
 change ```neuro_chr_to_analyze``` in order to change analysis to 'neuro_postCentral', 'neuro_postPeripheral', 'neuro_postBoth'
@@ -52,30 +61,28 @@ change ```neuro_type_analyze``` in order to change analysis to 'cpns_results' or
 
 ```{r}
 neuro_chr_to_analyze <- "neuro_postCentral"
-neuro_type_analyze <- "binary_results"
+#neuro_chr_to_analyze <- "neuro_postPeripheral"
 neuro_type_analyze <- "cpns_results"
-
-if (neuro_type_analyze == "binary_results") {
-  neuro_chr_to_analyze <- ""
-} else {
-  neuro_type_analyze <- "cpns_results"
-}
 
 site_results <- mget(ls(pattern = "result"))
 site_results <- site_results[sorted_sites]
+```
 
-get_life_row <- function(df,
-                         outcome = "time_severe_reg_elix",
-                         period = "first_hosp_results",
-                         neuro_type = neuro_type_analyze) {
-  life_output <- df[[c(period, neuro_type, outcome, "average_survival", "survf")]]
-  bind_cols(life_output[c("surv", "std.err", "time", "strata")]) %>%
-    mutate(
-      site = df$site,
-      #n_site = df[[c(period, neuro_type, outcome, "cox")]]
-    )
-}
-#df = site_results[[1]]
+## Define outcomes
+
+```{r}
+outcomes <-
+  c(
+    "time_first_discharge_reg_elix",
+    "time_severe_reg_elix",
+    "time_deceased_reg_elix"
+  )
+```
+
+
+## Cox model
+
+```{r}
 get_cox_row <- function(df,
                         outcome = "time_severe_reg_elix",
                         period = "first_hosp_results",
@@ -89,366 +96,9 @@ get_cox_row <- function(df,
     ) %>%
     rownames_to_column("variable")
 }
-```
 
-
-```{r}
-outcomes <-
-  c(
-    "time_first_discharge_reg_elix",
-    "time_severe_reg_elix",
-    "time_deceased_reg_elix"
-  )
-
-meta_results <- list()
-
-for (outcome_i in outcomes) {
-  meta_results[[outcome_i]] <-
-    site_results %>%
-    lapply(get_life_row, outcome = outcome_i) %>%
-    bind_rows() %>%
-    mutate(outcome = outcome_i)
-}
-
-res_dat <- bind_rows(meta_results)
-res_dat_surv <- res_dat[[1]] %>% data.frame()
-colnames(res_dat_surv) <- c("None", "PNS", "CNS")
-
-res_dat_std.err <- res_dat[[2]] %>% data.frame()
-colnames(res_dat_std.err) <- c("None", "PNS", "CNS")
-res_dat_std.err <- res_dat_std.err  %>%
-  cbind(., res_dat[3:5]) %>% 
-  pivot_longer(cols = None:CNS,  names_to = "strata", values_to = "std.err")
-
-res_dat_surv <- res_dat_surv %>%
-  cbind(., res_dat[3:5]) %>% 
-  pivot_longer(cols = None:CNS,  names_to = "strata", values_to = "surv") %>% 
-  left_join(., res_dat_std.err) %>% 
-  mutate(std.err = ifelse(is.nan(std.err), NA, std.err)) %>%
-  filter(!time < 0) %>% 
-  add_count(site, strata, outcome, name = "n_timepoints") %>%
-  complete(time, site, nesting(strata, outcome)) %>%
-  mutate(surv = if_else(is.na(surv) & time == 0, 1, surv)) %>%
-  group_by(site, strata, outcome) %>%
-  arrange(time) %>% 
-  fill(surv, .direction = "down") %>%
-  fill(std.err, n_timepoints, .direction = "down") %>%
-  #fill(std.err, n_site, n_timepoints, .direction = "downup") %>%
-  #filter(n_timepoints >= 5, time >= 0) %>%
-  ungroup()
-
-# add total number of events for each site
-calc_events <- function(site_results, outcome) {
-  
-  events <- site_results[["first_hosp_results"]][["cpns_results"]][[paste(outcome)]][["event_table_obfs"]] %>% 
-  add_count(status, name = "n_timepoints") %>% 
-  complete(time, nesting(status)) %>%
-  arrange(time) %>% 
-  group_by(status) %>%
-  select(-n.risk, -n.censor) %>% 
-  fill(n_timepoints, .direction = "downup") %>%
-  fill(n.event, .direction = "downup") %>% 
-  #filter(time %in% c(1, 30, 60)) %>% 
-  ungroup()
-  
-  return(events)
-  
-}
-
-# use for loop to calculate these numbers across sites
-
-events_list <- list()
-
-for(i in 1:length(site_results)) {
-  
-  severe_results <- calc_events(site_results[[i]], "time_severe_reg_elix") %>% 
-    mutate(site = site_results[[i]][['site']],
-           outcome = "time_severe_reg_elix")
-  
-    death_results <- calc_events(site_results[[i]], "time_deceased_reg_elix") %>% 
-    mutate(site = site_results[[i]][['site']],
-           outcome = "time_deceased_reg_elix")
-    
-    discharge_results <- calc_events(site_results[[i]], "time_first_discharge_reg_elix") %>% 
-    mutate(site = site_results[[i]][['site']],
-           outcome = "time_first_discharge_reg_elix")
-    
-    event_results <- rbind(severe_results, 
-                           death_results, 
-                           discharge_results)
-  
-  events_list[[i]] <- event_results
-  
-}
-
-
-events_table <- do.call(rbind.data.frame, events_list) %>% 
-  rename(strata = "status") 
-
-events_table$strata <- recode(events_table$strata,
-                              `neuro_post=None` = "None",
-                              `neuro_post=Peripheral` = "PNS", 
-                              `neuro_post=Central` = "CNS")
-
-res_dat_surv <- left_join(res_dat_surv, 
-                           events_table %>% select(site, outcome, strata, time, n.event), 
-                           by = c("site", "outcome", "strata", "time"))
-
-res_dat_surv <- res_dat_surv %>% 
-  group_by(site, strata, outcome) %>% 
-  fill(n.event, .direction = "downup") %>% 
-  mutate(n.event = replace_na(n.event, 0))
-  
-
-# sum total number of events from each site
-# Chaun Q: should this be calculated per strata?
-calc_total_counts <- res_dat_surv %>% 
-  data.frame() %>% 
-  group_by(site, outcome, strata) %>% 
-  summarize(total_event = sum(n.event)) %>% 
-  mutate(total_event = replace_na(total_event, 0)) %>% 
-  ungroup()
-
-res_dat_surv <- res_dat_surv %>% 
-  left_join(., calc_total_counts, by = c("site", "outcome", "strata"))
-
-```
- 
-```{r}
-save(res_dat_surv, file = "res_dat_surv.rda")
-```
-
-
-```{r}
-get_surv <- function(surv, std.err, site) {
-  if (length(surv) == 1) {
-    return(surv)
-  } else {
-    junk <- rma(y = surv, sei = std.err, random = ~ 1 | site, method = "DL") # metafor for each strata
-    return(c(junk$beta))
-  }
-}
-get_se <- function(surv, std.err, site) {
-  if (length(std.err) == 1) {
-    return(std.err)
-  } else {
-    junk <- metafor::rma(y = surv, sei = std.err, random = ~ 1 | site, method = "DL") # metafor for each strata
-    return(c(junk$se))
-  }
-}
-# res_dat %>%
-#   filter(is.nan(std.err))
-```
-
-## Meta-analysis with Adjusted Curves
-
-```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
-# test <- res_dat_surv %>% 
-#   filter(#site == "NWU" | site == "UPENN", 
-#          strata == "PNS", 
-#          outcome == "time_deceased_reg_elix")
-# plot(test$time, test$surv)
-# 
-# junk <- rma(y = surv, sei = std.err, method = "DL", data = test)
-
-# t0.all = sort(unique(res_dat_surv$time))
-# strata = levels(as.factor(res_dat_surv$strata))
-# res.meta <- NULL
-
-# for (istrata in strata) {
-#   surv.meta <- NULL
-#   for (t0 in t0.all) {
-#     tmp <- res_dat_surv[res_dat_surv$time == t0 & res_dat_surv$strata == istrata, ]
-#     tmp <- tmp %>% filter(outcome == "time_deceased_reg_elix")
-#     if (nrow(tmp) != 0) {
-#       if (nrow(tmp) == 1) {
-#         junk.meta <- tmp$surv
-#         junk.se <- tmp$std.err
-#       } else {
-#         junk <- rma(y = tmp$surv, sei = tmp$std.err, method = "DL") # metafor for each strata
-#         junk.meta <- c(junk$beta)
-#         junk.se <- c(junk$se)
-#       }
-#     }
-#     surv.meta <- rbind(surv.meta, data.frame(surv = junk.meta, se = junk.se))
-#   }
-#   res.meta <- rbind(res.meta, data.frame(strata = istrata, time = t0.all, surv.meta))
-# }
-
-# # add the meta package derived weights from below 
-# weights_pns <- combined_results %>% select(studlab, analysis, Weight.random)
-# weights_cns <- combined_results %>% select(studlab, analysis, Weight.random)
-# 
-# weights_pns <- weights_pns %>% 
-#   rename(site = "studlab", 
-#          outcome = "analysis") %>% 
-#   mutate(strata = "PNS")
-# 
-# weights_cns <- weights_cns %>% 
-#   rename(site = "studlab", 
-#          outcome = "analysis")
-# 
-# weights <- rbind(weights_pns, weights_cns)
-# 
-# res_dat_survx <- res_dat_surv %>%
-#   left_join(., weights_cns, by = c("site", "outcome"))
-# 
-# ### alternatively, calcualte weight by square the standard error to obtain variance
-# ### then take inverse of the variance
-# res_dat_surv <- res_dat_surv %>% 
-#   mutate(weight = 1/(std.err^2))
-
-meta_surv_df <- res_dat_surv %>%
-  ungroup() %>%  
-  as.data.frame() %>% 
-  filter(!total_event == 0) %>% 
-  group_by(strata, outcome, time) %>%
-  summarise(
-    se = get_se(surv, std.err, site),
-    meta_surv = get_surv(surv, std.err, site),
-    .groups = "drop"
-  ) %>%
-  mutate(
-    ymin = meta_surv - 1.96 * se,
-    ymax = meta_surv + 1.96 * se,
-    strata = str_replace(strata, "neuro_post=", ""),
-    outcome = factor(outcome, levels = outcomes) %>%
-      fct_recode(
-        "Mortality" = "time_deceased_reg_elix",
-        "Severity" = "time_severe_reg_elix",
-        "Time to first discharge" = "time_first_discharge_reg_elix"
-      )
-  )
-
-# refactor
-meta_surv_df$strata <- as.factor(meta_surv_df$strata)
-meta_surv_df$strata <- fct_recode(meta_surv_df$strata, "NNC" = "None")
-
-meta_surv_df$strata <- factor(meta_surv_df$strata, levels=c("NNC", "CNS", "PNS"), labels=c("NNC", "CNS", "PNS"))
-
-group.colors <- c(`NNC` = "darkgray", PNS = "slateblue", CNS ="tomato")
-
-
-meta_surv_df %>%
-  filter(time <= 60) %>% 
-  ggplot(aes(
-    x = time, y = meta_surv,
-    color = strata,
-  )) +
-  geom_line(aes()) +
-  # geom_ribbon(aes(ymin = ymin, ymax = ymax), alpha = 0.1, linetype = 2) +
-  labs(color = NULL, y = NULL) +
-  scale_colour_manual(values = group.colors) + 
-  facet_wrap(~outcome, ncol = 3) +
-# ggrepel::geom_text_repel(
-#   data = . %>% filter(
-#     time == last(time),
-#     outcome == "Mortality"
-#   ),
-#   aes(
-#     label = strata,
-#     x = time + 10,
-#     y = meta_surv,
-#     color = strata
-#   ), direction = "y"
-# ) +
-  coord_cartesian(clip = "off", ylim = c(0, 1), expand = FALSE) +
-  xlab("Time (days)") + 
-  ylab("Survival Probability") + 
-  #guides(color = FALSE) +
-  theme_classic() + 
-  theme(legend.text=element_text(size=11)) + 
-  guides(colour = guide_legend(override.aes = list(size=2)))
-```
-
-## Create Life-table
-
-I need to copy the code for the res_dat_surv timepoint imputation in order to create the tables with outcomes and number of events, censored, and at risk
-
-```{r eval=FALSE, include=FALSE}
-time_dis_nwu <- NWU_results[["first_hosp_results"]][["cpns_results"]][["time_severe_reg_elix"]][["event_table_obfs"]] %>% 
-  add_count(status, name = "n_timepoints") %>% 
-  complete(time, nesting(status)) %>%
-  arrange(time) %>% 
-  group_by(status) %>%
-  fill(n_timepoints, n.risk, n.event, n.censor, .direction = "downup") %>% 
-  #filter(time %in% c(1, 30, 60)) %>% 
-  ungroup()
-
-time_dis_pitt <- UPITT_results[["first_hosp_results"]][["cpns_results"]][["time_severe_reg_elix"]][["event_table_obfs"]] %>% 
-  add_count(status, name = "n_timepoints") %>% 
-  complete(time, nesting(status)) %>%
-  arrange(time) %>% 
-  group_by(status) %>%
-  fill(n_timepoints, n.risk, n.event, n.censor, .direction = "downup") %>% 
-  filter(time %in% c(1, 30, 60)) %>% 
-  ungroup()
-
-time_dis_mgb <- MGB_results[["first_hosp_results"]][["cpns_results"]][["time_severe_reg_elix"]][["event_table_obfs"]] %>% 
-  add_count(status, name = "n_timepoints") %>% 
-  complete(time, nesting(status)) %>%
-  arrange(time) %>% 
-  group_by(status) %>%
-  fill(n_timepoints, n.risk, n.event, n.censor, .direction = "downup") %>% 
-  filter(time %in% c(1, 30, 60)) %>% 
-  ungroup()
-
-
-severe_results <- bind_rows(time_dis_nwu, time_dis_pitt, time_dis_mgb) %>% 
-  group_by(time, status) %>% 
-  mutate(n.risk_total = sum(n.risk),
-         n.censor_total = sum(n.censor),
-         n.event_total = sum(n.event)) %>% 
-  distinct(time, n.risk_total, n.censor_total, n.event_total) %>% 
-  pivot_wider()
-
-severe_results1 <- severe_results %>% filter(time == 1)
-severe_results30 <- severe_results %>% filter(time == 30)
-severe_results60 <- severe_results %>% filter(time == 60)
-```
-
-
-
-### Alternatively, compute average survival by hand
-Not evaluated for now.
-Need to recompute `n_site`.
-
-```{r eval=FALSE}
-# res_dat %>%
-#   group_by(strata, time, outcome) %>%
-#   summarise(meta_surv = sum(surv * n_site) / sum(n_site), .groups = "drop") %>%
-#   mutate(outcome = fct_rev(outcome)) %>%
-#   ggplot(aes(
-#     x = time, y = meta_surv,
-#     color = fct_reorder2(strata, outcome, meta_surv)
-#   )) +
-#   geom_line(aes()) +
-#   labs(color = NULL, y = NULL) +
-#   rcartocolor::scale_color_carto_d() +
-#   facet_wrap(~outcome) +
-#   geom_text(
-#     data = . %>% filter(
-#       time == last(time),
-#       outcome == "Mortality"
-#     ),
-#     aes(
-#       label = strata,
-#       x = time + 10,
-#       y = meta_surv,
-#       color = strata
-#     ),
-#     hjust = 0
-#   ) +
-#   coord_cartesian(clip = "off", ylim = c(0, 1), expand = FALSE) +
-#   guides(color = FALSE) +
-#   theme_classic() +
-#   theme(plot.margin = margin(2, 50, 2, 2))
-```
-
-## Cox model
-
-```{r}
 cox_results <- list()
+
 for (outcome_i in outcomes) {
   cox_results[[outcome_i]] <-
     site_results %>%
@@ -456,12 +106,10 @@ for (outcome_i in outcomes) {
     bind_rows() %>%
     mutate(outcome = outcome_i)
 }
-test <- cox_results$time_deceased_reg_elix %>%
+
+cox_results$time_severe_reg_elix %>%
   filter(variable == "neuro_postCentral") %>%
-  with(rma(yi = coef, sei = se.coef., random = ~ 1 | site, method = "DL"))
-# cox_results$time_severe_reg_elix %>%
-#   filter(variable == "neuro_postCentral") %>%
-#   with(rma(yi = coef, sei = se.coef., method = "DL"))
+  with(rma(yi = coef, sei = se.coef., method = "DL"))
 # cox_results$time_first_discharge_reg_elix %>%
 #   filter(variable == "neuro_postCentral") %>%
 #   with(rma(yi = coef, sei = se.coef., method = "DL"))
@@ -473,20 +121,14 @@ test <- cox_results$time_deceased_reg_elix %>%
 ## Random effects meta-analysis
 
 ```{r}
-if (neuro_type_analyze == "binary_results") {
-  variable_to_filter <- "neuro_postneuro_cond"
-} else {
-  variable_to_filter <- neuro_chr_to_analyze
-}
+meta_results <- list()
 
-run_meta_anlaysis <- function(variable) {
-  
-  for (outcome_i in outcomes) {
+for (outcome_i in outcomes) {
   meta_results[[outcome_i]] <-
     cox_results[[outcome_i]] %>%
     bind_rows() %>%
     data.frame() %>%
-    filter(variable == variable_to_filter) %>%
+    filter(variable == neuro_chr_to_analyze) %>%
     metagen(
       TE = coef,
       seTE = se.coef.,
@@ -500,8 +142,7 @@ run_meta_anlaysis <- function(variable) {
       studlab = site
     )
 }
-  
-}
+
 
 
 ```
@@ -544,14 +185,28 @@ for (i in names(meta_results)) {
 combined_results <- do.call(rbind.data.frame, ma_combine)
 ```
 
-NUH has missing value for `time_to_last_disharge` - we will exclude
+### save weights to generate the survival curves
 
-```{r eval=FALSE, include=FALSE}
-if(neuro_chr_to_analyze == "neuro_postPeripheral") { 
+```{r}
+if (neuro_chr_to_analyze == "neuro_postCentral") {
   
-  combined_results <- combined_results %>% 
-    filter(!is.na(TE))
-  }
+  cns_weights <- combined_results %>% 
+  select(analysis, studlab, Weight.random) %>% 
+  mutate(strata = "CNS")
+
+  # Save weights
+  save(cns_weights, file = "survival_model/cns_weights.rda")
+  
+} else {
+  
+  pns_weights <- combined_results %>% 
+  select(analysis, studlab, Weight.random) %>% 
+  mutate(strata = "PNS")
+
+  # Save weights
+  save(pns_weights, file = "survival_model/pns_weights.rda")
+  
+}
 ```
 
 
@@ -621,23 +276,6 @@ combined_results <- combined_results %>% mutate(new_row = paste0(analysis_temp, 
 
 row.names(combined_results) <- combined_results$new_row
 combined_results <- combined_results %>% select(-row_num, -new_row, -analysis_temp)
-```
-
-Carry over name of the analysis to the blank row
-
-```{r}
-# # Add the analysis labels to the original site level rows - these will be our labels for the forest plots
-# combined_resultsx <- combined_results %>%
-#   fill(analysis, .direction = "up") %>%
-#   mutate(
-#     id = seq_len(nrow(.)),
-#     Site = if_else(is.na(Site), analysis, Site),
-#     lag_Site = lag(Site),
-#     lag_Site = if_else(is.na(lag_Site), "First", lag_Site),
-#     Site = ifelse(Site == lag_Site, paste(Site, "_", id), Site)
-#   ) %>%
-#   select(-analysis, -lag_Site, -id) %>%
-#   rename("Analysis" = Site)
 ```
 
 Indent site results and create a new Analysis column to be our forest plot labels
@@ -755,12 +393,19 @@ combined_results <- combined_results %>%
 
 ## Results
 
-Define a vector of invalid sites. As of now, ICSM and NUH, have such low counts that CIs and estimates are very high/low. To standardize the plots, we will want to abstract the min/max values while excluding any outlier sites like ICSM and NUH
+Define a vector of invalid sites for those sites that have such low counts that CIs and estimates are very high/low. To standardize the plots, we will want to abstract the min/max values while excluding any outlier (ie: Invalid) sites
 
 ```{r}
-invalid_sites <- sorted_sites[sorted_sites %in% c("ICSM_results", "GOSH_results")]
-invalid_sites <- gsub("_results", "", invalid_sites)
-# indent the sites to facilitate mapping with our combined_results df
+if (neuro_chr_to_analyze == "neuro_postCentral") {
+
+  invalid_sites <- sorted_sites[sorted_sites %in% c("ICSM_results", "BCH_results")]
+  invalid_sites <- gsub("_results", "", invalid_sites)
+
+} else {
+  
+  invalid_sites <- sorted_sites[sorted_sites %in% c("ICSM_results", "GOSH_results")]
+  invalid_sites <- gsub("_results", "", invalid_sites)
+}
 ```
 
 create a scale function to identify the min and max CI for each site, excluding sites with values of 'Inf' or our invalid sites
@@ -878,3 +523,10 @@ forester(
   point_shapes = shapes,
   file_path = here::here(paste0("figs/surivial_time_to_death", "_", neuro_type_analyze, "_", neuro_chr_to_analyze, ".png")))
 ```
+
+
+
+
+
+
+

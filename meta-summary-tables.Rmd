@@ -10,22 +10,22 @@ library(tidyverse)
 ```
 
 ```{r}
-cns <- read.csv("meta_tables/surivival_analysis_neuro_postCentral.csv")
+cns <- read.csv("meta_tables/surivival_analysis_cpns_resultsneuro_postCentral.csv")
 
-pns <- read.csv("meta_tables/surivival_analysis_neuro_postPeripheral.csv")
+pns <- read.csv("meta_tables/surivival_analysis_cpns_resultsneuro_postPeripheral.csv")
 
-both <- read.csv("meta_tables/surivival_analysis_neuro_postBoth.csv")
+#both <- read.csv("meta_tables/surivival_analysis_cpns_resultsneuro_postBoth.csv")
 
-binary_results <- read.csv("meta_tables/surivival_analysis_binary_results.csv")
+#binary_results <- read.csv("meta_tables/surivival_analysis_binary_results.csv")
 ```
 
 ```{r}
 # cnps results
 cns$Neuro <- "CNS"
 pns$Neuro <- "PNS"
-both$Neuro <- "Both"
+#both$Neuro <- "Both"
 
-results <- rbind(cns, pns, both)
+results <- rbind(cns, pns)
 
 result_table <- results %>% 
   filter(Analysis == "") %>% 
@@ -35,11 +35,11 @@ result_table <- results %>%
 
 
 # binary_results
-binary_result_table <- binary_results %>% 
-  filter(Analysis == "") %>% 
-  select(-Analysis, -Weight.random) %>% 
-  rename("Analysis" = X,
-         "Estimate" = Estimate.)
+# binary_result_table <- binary_results %>% 
+#   filter(Analysis == "") %>% 
+#   select(-Analysis, -Weight.random) %>% 
+#   rename("Analysis" = X,
+#          "Estimate" = Estimate.)
 ```
 
 Rename factors
@@ -48,14 +48,12 @@ Rename factors
 result_table$Analysis <- recode_factor(result_table$Analysis,
                                        "time_deceased_reg_elix" = "Time to Mortality", 
                                        "time_severe_reg_elix" = "Time to Severity",
-                                       "time_first_discharge_reg_elix" = "Time to First Discharge",
-                                       "time_last_discharge_reg_elix" = "Time to Last Discharge")
+                                       "time_first_discharge_reg_elix" = "Time to First Discharge")
 
-binary_result_table$Analysis <- recode_factor(binary_result_table$Analysis,
-                                       "time_deceased_reg_elix" = "Time to Mortality", 
-                                       "time_severe_reg_elix" = "Time to Severity",
-                                       "time_first_discharge_reg_elix" = "Time to First Discharge",
-                                       "time_last_discharge_reg_elix" = "Time to Last Discharge")
+# binary_result_table$Analysis <- recode_factor(binary_result_table$Analysis,
+#                                        "time_deceased_reg_elix" = "Time to Mortality", 
+#                                        "time_severe_reg_elix" = "Time to Severity",
+#                                        "time_first_discharge_reg_elix" = "Time to First Discharge")
 ```
 
 Clean up table
@@ -66,9 +64,9 @@ result_table <- result_table %>%
          "Neuro Status" = Neuro) %>% 
   select(Analysis, `Neuro Status`, `Hazard Ratio`, p.value, P.value, everything())
 
-binary_result_table <- binary_result_table %>% 
-  rename("Hazard Ratio" = Estimate) %>% 
-  select(Analysis, `Hazard Ratio`, p.value, P.value, everything())
+# binary_result_table <- binary_result_table %>% 
+#   rename("Hazard Ratio" = Estimate) %>% 
+#   select(Analysis, `Hazard Ratio`, p.value, P.value, everything())
 ```
 
 Save manuscript table
@@ -82,11 +80,11 @@ manuscript_table <- result_table %>%
 write.csv(manuscript_table, "meta_tables/Manuscript_Table.csv", row.names = FALSE)
 
 # binary
-binary_manuscript_table <- binary_result_table %>% 
-  select(Analysis, `Hazard Ratio`, P.value) %>% 
-  arrange(desc(Analysis))
-
-write.csv(binary_manuscript_table, "meta_tables/Manuscript_Table_Binary_Results.csv", row.names = FALSE)
+# binary_manuscript_table <- binary_result_table %>% 
+#   select(Analysis, `Hazard Ratio`, P.value) %>% 
+#   arrange(desc(Analysis))
+# 
+# write.csv(binary_manuscript_table, "meta_tables/Manuscript_Table_Binary_Results.csv", row.names = FALSE)
 ```
 
 Save supplementary table
@@ -103,16 +101,16 @@ supp_table <- result_table %>%
 
 write.csv(supp_table, "meta_tables/Supplementary_Table.csv", row.names = FALSE)
 
-# binary 
-binary_supp_table <- binary_result_table %>% 
-   mutate(I2 = paste(I2, I2.CI),
-          tau2 = paste(tau2, tau2.CI)) %>% 
-  select(Analysis, `Hazard Ratio`, p.value, Predict.CI, I2, tau2) %>%
-  rename("Prediction Interval" = Predict.CI,
-         "P-value" = p.value) %>% 
-  arrange(desc(Analysis))
-  
-
-write.csv(binary_supp_table, "meta_tables/Supplementary_Table_Binary_Results.csv", row.names = FALSE)
+# # binary 
+# binary_supp_table <- binary_result_table %>% 
+#    mutate(I2 = paste(I2, I2.CI),
+#           tau2 = paste(tau2, tau2.CI)) %>% 
+#   select(Analysis, `Hazard Ratio`, p.value, Predict.CI, I2, tau2) %>%
+#   rename("Prediction Interval" = Predict.CI,
+#          "P-value" = p.value) %>% 
+#   arrange(desc(Analysis))
+#   
+# 
+# write.csv(binary_supp_table, "meta_tables/Supplementary_Table_Binary_Results.csv", row.names = FALSE)
 ```
 
