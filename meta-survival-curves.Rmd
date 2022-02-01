@@ -91,48 +91,6 @@ get_cox_row <- function(df,
     ) %>%
     rownames_to_column("variable")
 }
-
-get_surv <- function(surv, std.err, site, weight) {
-  if (length(surv) == 1) {
-    return(surv)
-  } else {
-    junk <- rma(y = surv, sei = std.err, weights = weight, method = "DL") # metafor for each strata
-    return(c(junk$beta))
-  }
-}
-get_se <- function(surv, std.err, site, weight) {
-  if (length(std.err) == 1) {
-    return(std.err)
-  } else {
-    junk <- metafor::rma(y = surv, sei = std.err, weights = weight, method = "DL") # metafor for each strata
-    return(c(junk$se))
-  }
-}
-get_pval <- function(surv, std.err, site, weight) {
-  if (length(std.err) == 1) {
-    return(std.err)
-  } else {
-    junk <- metafor::rma(y = surv, sei = std.err, weights = weight, method = "DL") # metafor for each strata
-    return(c(junk$pval))
-  }
-}
-
-get_ci.lb <- function(surv, std.err, site, weight) {
-  if (length(std.err) == 1) {
-    return(std.err)
-  } else {
-    junk <- metafor::rma(y = surv, sei = std.err, weights = weight, method = "DL") # metafor for each strata
-    return(c(junk$ci.lb))
-  }
-}
-get_ci.ub <- function(surv, std.err, site, weight) {
-  if (length(std.err) == 1) {
-    return(std.err)
-  } else {
-    junk <- metafor::rma(y = surv, sei = std.err, weights = weight, method = "DL") # metafor for each strata
-    return(c(junk$ci.ub))
-  }
-}
 ```
 
 ```{r}
@@ -188,6 +146,11 @@ group.colors <- c(NNC = "darkgray", PNS = "slateblue", CNS ="tomato")
 site_names <- names(site_results) %>% 
   gsub("_results", "", .)
 
+# calculate CIs
+zval <- qnorm(1- (1-0.95)/2, 0, 1)
+standard_error <- function(x) sd(x, na.rm = TRUE) / sqrt(length(x)) # Create own function
+
+
 pdf(file="manuscript/figures/site_level_survival_curves.pdf", height = 4, width = 6)  
 
 for(i in site_names) {
@@ -200,23 +163,35 @@ for(i in site_names) {
                "Time to first discharge" = "time_first_discharge_reg_elix"
              )) %>% 
     filter(site == i) %>% 
+    group_by(outcome, strata) %>% 
+    mutate(
+      lt_hat = log(-log(surv)),
+      se_lt_hat = standard_error(surv)) %>% 
+    ungroup() %>% 
+    mutate(ci_lower = exp(-exp(log(-log(surv)) + zval*se_lt_hat)),
+           ci_upper = exp(-exp(log(-log(surv)) - zval*se_lt_hat))) %>% 
     filter(time <= 60) %>% 
     ggplot(aes(
-      x = time, y = surv,
-      color = strata,
-    )) +
-    geom_line(aes()) +
-    labs(color = NULL, y = NULL) +
-    facet_wrap(~outcome, ncol = 3) +
-    scale_colour_manual(values = group.colors) + 
-    coord_cartesian(clip = "off", ylim = c(0, 1), expand = FALSE) +
-    xlab("Time (days)") + 
-    ylab("Event Probability") + 
-    theme_classic() + 
-    theme(legend.text=element_text(size=11)) + 
-    guides(colour = guide_legend(override.aes = list(size=2)))
+    x = time, y = surv,
+    color = strata,
+    fill = strata,
+  )) +
+  geom_line(aes()) +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper, fill = strata), alpha = 0.2, linetype = 0, show.legend = FALSE) + 
+  labs(color = NULL, y = NULL) +
+  scale_colour_manual(values = group.colors) + 
+  scale_fill_manual(values = group.colors) + 
+  facet_wrap(~outcome, ncol = 3) +
+  coord_cartesian(clip = "off", ylim = c(0, 1), expand = FALSE) +
+  xlab("Time (days)") + 
+  ylab("Event Probability") +
+  theme_classic() + 
+  labs(color = "Neuro Status",
+       fill = "") + 
+  theme(legend.position="top")
   
-  print(plot + ggtitle(paste(i)))
+  print(plot + ggtitle(paste(i)) + 
+           theme(plot.title = element_text(hjust = 0.5)))
   
   
 }
@@ -228,17 +203,104 @@ dev.off()
 ## Remove sites excluded from meta-analysis
 
 ```{r}
-# site_results[['NUH_results']] <- NULL
-# site_results[['BCH_results']] <- NULL
-# site_results[['GOSH_results']] <- NULL
-
 res_dat_surv <- res_dat_surv %>% 
   filter(!site %in% c("NUH", "BCH", "GOSH"))
 
 nrow(data.frame(unique(res_dat_surv$site)))
 ```
 
+```{r}
+get_life_table <- function(df,
+                         outcome = "time_severe_reg_elix",
+                         period = "first_hosp_results",
+                         neuro_type = neuro_type_analyze) {
+  life_output <- df[[c(period, neuro_type, outcome, "event_table_obfs")]] %>%
+    mutate(
+      site = df$site,
+      #n_site = df[[c(period, neuro_type, outcome, "cox")]]
+    )
+}
 
+life_tables <- list()
+
+for (outcome_i in outcomes) {
+  life_tables[[outcome_i]] <-
+    site_results %>%
+    lapply(get_life_table, outcome = outcome_i) %>%
+    bind_rows() %>%
+    mutate(outcome = outcome_i)
+}
+
+
+# should calculate the number at risk at each time point
+# then calculate the cumulative number of events and censored - can then clarify cumulative counts in the figure legend
+km_life_table <- bind_rows(life_tables) %>% 
+  filter(!site %in% c("BCH", "GOSH", "NUH")) %>% 
+  group_by(status, outcome) %>%
+  complete(time = 1:max(time)) %>%  
+  #mutate(count = n_distinct(time)) %>% 
+  fill(n.risk, .direction = "down") %>%
+  group_by(status, outcome, time) %>% 
+  mutate(`N risk` = sum(n.risk, na.rm = TRUE),
+         cumulative.n.censor = sum(n.censor, na.rm = TRUE),
+         cumulative.n.event = sum(n.event, na.rm = TRUE)) %>% 
+  group_by(outcome, status) %>% 
+  distinct(time, outcome, `N risk`, status, cumulative.n.censor, cumulative.n.event) %>% 
+  mutate(`Cumulative N censor` = cumsum(ifelse(is.na(cumulative.n.censor), 0, cumulative.n.censor)) + cumulative.n.censor*0,
+         `Cumulative N event` = cumsum(ifelse(is.na(cumulative.n.event), 0, cumulative.n.event)) + cumulative.n.event*0) %>% 
+  distinct(time, outcome, status, `N risk`, `Cumulative N censor`, `Cumulative N event`)
+
+total_n_analysis = km_life_table %>% 
+  filter(time == 1) %>% 
+  distinct(outcome, status, `N risk`, `Cumulative N censor`, `Cumulative N event`) %>% 
+  group_by(outcome) %>% 
+  mutate(n_analysis = sum(`N risk`,`Cumulative N event`)) 
+
+# %>% 
+#   filter(time %in% c(1, 30, 60)) %>% 
+#   ungroup() %>% 
+#   arrange(outcome)
+
+km_life_table_bch <- bind_rows(life_tables) %>% 
+  filter(site == "BCH") %>% 
+  group_by(status, outcome) %>%
+  complete(time = 1:max(time)) %>%  
+  fill(n.risk, .direction = "down") %>%
+  group_by(status, outcome, time) %>% 
+  mutate(`N risk` = sum(n.risk, na.rm = TRUE),
+         cumulative.n.censor = sum(n.censor, na.rm = TRUE),
+         cumulative.n.event = sum(n.event, na.rm = TRUE)) %>% 
+  group_by(outcome, status) %>% 
+  distinct(time, outcome, `N risk`, status, cumulative.n.censor, cumulative.n.event) %>% 
+  mutate(`Cumulative N censor` = cumsum(ifelse(is.na(cumulative.n.censor), 0, cumulative.n.censor)) + cumulative.n.censor*0,
+         `Cumulative N event` = cumsum(ifelse(is.na(cumulative.n.event), 0, cumulative.n.event)) + cumulative.n.event*0) %>% 
+  distinct(time, outcome, status, `N risk`, `Cumulative N censor`, `Cumulative N event`) %>% 
+  filter(time %in% c(1, 30, 60)) %>% 
+  ungroup() %>% 
+  arrange(outcome)
+
+km_life_table_gosh <- bind_rows(life_tables) %>% 
+  filter(site == "GOSH") %>% 
+  group_by(status, outcome) %>%
+  complete(time = 1:max(time)) %>%  
+  fill(n.risk, .direction = "down") %>%
+  group_by(status, outcome, time) %>% 
+  mutate(`N risk` = sum(n.risk, na.rm = TRUE),
+         cumulative.n.censor = sum(n.censor, na.rm = TRUE),
+         cumulative.n.event = sum(n.event, na.rm = TRUE)) %>% 
+  group_by(outcome, status) %>% 
+  distinct(time, outcome, `N risk`, status, cumulative.n.censor, cumulative.n.event) %>% 
+  mutate(`Cumulative N censor` = cumsum(ifelse(is.na(cumulative.n.censor), 0, cumulative.n.censor)) + cumulative.n.censor*0,
+         `Cumulative N event` = cumsum(ifelse(is.na(cumulative.n.event), 0, cumulative.n.event)) + cumulative.n.event*0) %>% 
+  distinct(time, outcome, status, `N risk`, `Cumulative N censor`, `Cumulative N event`) %>% 
+  filter(time %in% c(1, 30, 60)) %>% 
+  ungroup() %>% 
+  arrange(outcome)
+
+write.csv(km_life_table, "manuscript/tables/km_life_table_all.csv", row.names = FALSE)
+write.csv(km_life_table_bch, "manuscript/tables/km_life_table_all_bch.csv", row.names = FALSE)
+write.csv(km_life_table_gosh, "manuscript/tables/km_life_table_all_gosh.csv", row.names = FALSE)
+```
 
 ### Weight each site 
 
@@ -270,23 +332,43 @@ avg_weights <- cns_weights %>%
 ### Generate survival curves
 
 ```{r}
-standard_error <- function(x) sd(x, na.rm=TRUE) / sqrt(length(x)) 
+#chuan's code
+
+## y is the vector of beta coefficients; 
+## s is the vector of SE of beta coefficients;
+## wt is the weight (e.g, number of events, make sure it does not change over time)
+
+# Meg added the rule to handle cases when v.between is a negative number based on the following reference which explains: 
+#https://bookdown.org/MathiasHarrer/Doing_Meta_Analysis_in_R/heterogeneity.html
+# the value of I2 cannot be lower than 0%, so if Q happens to be smaller than K-1,we simply use 0 instead of a negative value.
+metaFUN.randomeffect=function(y, s, wt){
+  mm=c(y%*%wt/sum(wt))
+  df=length(y)-1
+  C=sum(wt)-sum((wt)^2)/sum(wt)
+  Q=wt%*%(y-mm)^2
+  k = length(y)
+  if (Q < k-1) {
+  v.between=0
+} else {
+  v.between=c((Q-df)/C); v.between
+}
+  ww=1/(s^2+v.between)
+  ss=sqrt(1/sum(ww))
+  data.frame(pool_mean=mm, pool_se=ss)
+}
+
+zval <- qnorm(1- (1-0.95)/2, 0, 1)
 
 meta_surv_df <- res_dat_surv %>%
   left_join(., avg_weights, by = c("site", "outcome")) %>%
   ungroup() %>%  
   as.data.frame() %>% 
-  #filter(!site %in% c("GOSH", "BCH")) %>% 
+  filter(!is.na(surv)) %>% 
   group_by(strata, outcome, time) %>%
-  summarise(
-    se = get_se(surv, std.err, site, weight = avg_weight),
-    meta_surv = get_surv(surv, std.err, weight = avg_weight)
-    #pval = get_pval(surv, std.err, site, weight = avg_weight),
-    #ci.lb = get_ci.lb(surv, std.err, site, weight = avg_weight),
-    #ci.ub = get_ci.ub(surv, std.err, site, weight = avg_weight),
-    #.groups = "drop"
+  mutate(
+    surv = metaFUN.randomeffect(surv, std.err, avg_weight)$pool_mean,
+    se = metaFUN.randomeffect(surv, std.err, avg_weight)$pool_se
   ) %>%
-  #group_by(strata, outcome, time) %>%
   mutate(
     strata = str_replace(strata, "neuro_post=", ""),
     outcome = factor(outcome, levels = outcomes) %>%
@@ -295,71 +377,40 @@ meta_surv_df <- res_dat_surv %>%
         "Severity" = "time_severe_reg_elix",
         "Discharge" = "time_first_discharge_reg_elix"
       )
-  )
+  ) %>% 
+    mutate(ci_l = surv - se*zval,
+           ci_u = surv + se*zval) %>% 
+  distinct(outcome, strata, time, surv, se, ci_l, ci_u)
 
 # refactor
 meta_surv_df$strata <- as.factor(meta_surv_df$strata)
-meta_surv_df$strata <- fct_recode(meta_surv_df$strata, "NNC" = "None")
 
-meta_surv_df$strata <- factor(meta_surv_df$strata, levels=c("NNC", "CNS", "PNS"), labels=c("NNC", "CNS", "PNS"))
+meta_surv_df$strata <- factor(meta_surv_df$strata, 
+                              levels=c("NNC", "CNS", "PNS"),
+                              labels=c("NNC", "CNS", "PNS"))
 
 group.colors <- c(NNC = "darkgray", PNS = "slateblue", CNS ="tomato")
-
-## test log-log approach
-#https://github.com/cran/survival/blob/master/R/survfit.R
-# annotated:https://github.com/therneau/survival/blob/5c2cdffbbd3840b2a100e2f9f115de8a5d496c3a/noweb/survfit.Rnw
-# specify params for *zvalcalculating confidence intervals
-zval <- qnorm(1- (1-0.95)/2, 0,1)
-logse = TRUE
-# logse param as confirmed via:
-#APHP_results[["first_hosp_results"]][["cpns_results"]][["time_severe_reg_elix"]][["average_survival"]][["survf"]]$logse
-
-
-test = meta_surv_df %>% 
-  group_by(outcome, strata) %>% 
-  mutate(
-    lt_hat = log(-log(meta_surv)),
-    se_lt_hat = standard_error(lt_hat)) %>% 
-  ungroup() %>% 
-  mutate(#se2 = zval * se/log(meta_surv),
-         ci_l = exp(-exp(log(-log(meta_surv)) + zval*se_lt_hat)),
-         ci_u = exp(-exp(log(-log(meta_surv)) - zval*se_lt_hat)))
-
 
 surv_curves <- meta_surv_df %>%
   filter(time <= 60) %>% 
   ggplot(aes(
-    x = time, y = meta_surv,
+    x = time, y = surv,
     color = strata,
     fill = strata,
   )) +
   geom_line(aes()) +
-  #geom_ribbon(aes(ymin = ymin, ymax = ymax), alpha = 0.1, linetype = 2) +
-  #geom_ribbon(aes(ymin = ci_l, ymax = ci_u, fill = strata), alpha = 0.2, linetype = 0, show.legend = FALSE) + 
-  #geom_ribbon(aes(ymin = ci.lb, ymax = ci.ub), alpha = 0.3, linetype = 0) + 
+  geom_ribbon(aes(ymin = ci_l, ymax = ci_u, fill = strata), alpha = 0.2, linetype = 0, show.legend = FALSE) + 
   labs(color = NULL, y = NULL) +
   scale_colour_manual(values = group.colors) + 
   scale_fill_manual(values = group.colors) + 
   facet_wrap(~outcome, ncol = 3) +
-  # ggrepel::geom_text_repel(
-  #   data = . %>% filter(
-  #     time == last(time),
-  #     outcome == "Mortality"
-  #   ),
-  #   aes(
-  #     label = strata,
-  #     x = time + 10,
-  #     y = meta_surv,
-  #     color = strata
-  #   ), direction = "y"
-# ) +
 coord_cartesian(clip = "off", ylim = c(0, 1), expand = FALSE) +
   xlab("Time (days)") + 
-  ylab("Event Probability") + 
-  #guides(color = FALSE) +
+  ylab("Event Probability") +
   theme_classic() + 
-  labs(color = "strata",
-       fill = ""); surv_curves
+  labs(color = "Neuro Status",
+       fill = "") + 
+  theme(legend.position="top"); surv_curves
 
 ggsave("manuscript/figures/survival_curves.png", surv_curves, height = 4, width = 6)
 ```
