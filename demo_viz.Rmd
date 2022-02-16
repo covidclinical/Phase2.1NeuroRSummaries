@@ -846,13 +846,15 @@ rr_calcs <- list()
 
 for (i in list_of_comorbs) {
   
-    rr <- comorb_table_wide_stratified %>% 
+  # https://www.cdc.gov/csels/dsepd/ss1978/lesson3/section5.html
+      rr <- comorb_table_wide_stratified %>% 
     filter(Comorbidity == paste(i)) %>% 
-    mutate(r_None = None_Total/patients_none, 
-           r_CNS = CNS_Total/cns_n,
-           r_PNS = PNS_Total/pns_n,
-           rr_CNS = r_CNS/r_None,
-           rr_PNS = r_PNS/r_None) 
+    mutate(r_CNS = CNS_Total/Comorb_Total,
+           r_PNS = PNS_Total/Comorb_Total,
+           r_noComorb_CNS = (cns_n - CNS_Total) / (N - Comorb_Total),
+           r_noComorb_PNS = (pns_n - PNS_Total) / (N - Comorb_Total),
+           rr_CNS = r_CNS/r_noComorb_CNS,
+           rr_PNS = r_PNS/r_noComorb_PNS) 
   
   rr_calcs[[i]] <- rr
   
