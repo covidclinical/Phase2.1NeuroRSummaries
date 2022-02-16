@@ -5,9 +5,10 @@ date: "3/22/2021"
 output: html_document
 ---
 
+**Do we have the number of patients who have been discharged? Is it correct to have all the patients listed for the time to discharge in the table 1? -- I could calculate based on survival curve numbers?**
+
 ```{r message=FALSE, warning=FALSE}
 library(tidyverse)
-library(dplyr)
 library(gridGraphics)
 library(gridExtra)
 library(ggpubr)
@@ -36,8 +37,9 @@ site_google_url <- "https://docs.google.com/spreadsheets/d/1epcYNd_0jCUMktOHf8mz
 site_params <- googlesheets4::read_sheet(site_google_url, sheet = 1)
 site_avails <- googlesheets4::read_sheet(site_google_url, sheet = 2)
 sorted_sites <- site_avails %>%
-  filter(new_received == "Y") %>%
-  pull(siteid)
+  filter(date_v3_received == 1) %>%
+  pull(siteid) %>%
+  paste("results", sep = "_")
 
 sites_wo_race <- site_params %>%
   filter(!include_race) %>%
@@ -45,16 +47,13 @@ sites_wo_race <- site_params %>%
 
 # colorBlindGrey6 <-
 #   c("#0072B2", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#CC79A7")
-
-results <- paste(sorted_sites, "results", sep = "_")
 ```
 
 
 ```{r}
-results <- results[results %in% c("NWU_results", "UPENN_results", "UPITT_results",
-                  "VA1_results", "VA2_results", "VA3_results", 
-                  "VA4_results", "VA5_results", "MGB_results")]
+results <- mget(ls(pattern = "results"))
 ```
+
 
 ## Demographic Data
 
@@ -63,7 +62,7 @@ results <- results[results %in% c("NWU_results", "UPENN_results", "UPITT_results
 ```{r}
 demo_table_list <- list()
 
-for (i in results) {
+for (i in sorted_sites) {
   tmp <- get(i)
   demo_table_list[[i]] <- tmp[[c(
     "first_hosp_results",
@@ -106,7 +105,7 @@ combined_table_wide <- bind_rows(demo_table_list) %>%
 
 ```{r}
 other_table_list <- list()
-for (i in results) {
+for (i in sorted_sites) {
   tmp <- get(i)
   other_table_list[[i]] <- tmp[[c(
     "first_hosp_results",
@@ -116,71 +115,44 @@ for (i in results) {
     select(site, everything())
 }
 
+# create a function to back transform the pre-admission scores which were performed as log(n + 1)
 combined_other_table_wide <- bind_rows(other_table_list) %>%
   filter(grepl("Mean|Median", name))
+
+transform_count <- function(x) {
+  
+  exp(x) - 1
+  
+}
+
+# here we transform the median admission scores and round them
+combined_other_table_wide_pre_adm <- combined_other_table_wide %>% 
+  filter(name == "Median pre admission cns [Min, Max]" | name == "Median pre admission pns [Min, Max]") %>% 
+  separate(None, c("None_first", "None_min", "None_max"), sep=" ") %>% 
+  separate(Central, c("CNS_first", "CNS_min", "CNS_max"), sep=" ") %>% 
+  separate(Peripheral, c("PNS_first", "PNS_min", "PNS_max"), sep=" ") %>% 
+  mutate(across(None_first:CNS_max, ~ gsub("\\[|\\]", "", .x))) %>% 
+  mutate(across(None_first:CNS_max, ~ gsub(",", "", .x))) %>% 
+  mutate(across(None_first:CNS_max, ~ as.numeric(.) %>% 
+                  transform_count(.) %>% 
+                  round(., 1))) %>% 
+  mutate(None = paste0(None_first, " [", None_min, ",", None_max, "]"),
+         Central = paste0(CNS_first, " [", CNS_min, ",", CNS_max, "]"),
+         Peripheral = paste0(PNS_first, " [", PNS_min, ",", PNS_max, "]")) %>% 
+  select(site, name, None, Peripheral, Central)
+
+# remove the old pre-admission scores
+combined_other_table_wide <- combined_other_table_wide %>% 
+  filter(!name == "Median pre admission cns [Min, Max]",
+         !name == "Median pre admission pns [Min, Max]",
+         !name == "Mean pre admission cns (SD)",
+         !name == "Mean pre admission pns (SD)")
+
+# add revised pre-admission scores
+combined_other_table_wide <- rbind(combined_other_table_wide, 
+                                   combined_other_table_wide_pre_adm)
 ```
 
-
-```{r fig.height=10}
-medians_df <- combined_other_table_wide %>%
-  filter(grepl("Median", name)) %>%
-  pivot_longer(None:Central, names_to = "neuro_type") %>%
-  replace_na(list(value = "0 [0, 0]")) %>%
-  mutate(
-    median_val = as.numeric(gsub(" \\[[^()]*\\]", "", value)),
-    min_max = gsub("\\[([^()]*)\\]|.", "\\1", value, perl = T),
-    # min_val = as.numeric(gsub("^(.*?),.*", "\\1", min_max)),
-    min_val = as.numeric(gsub(",.*$", "", min_max)),
-    max_val = as.numeric(gsub(".*,\\s*", "", min_max)),
-    grouped_var = gsub("Mean |Median | \\[Min, Max\\]| \\(SD\\)", "", name)
-  ) %>%
-  mutate_if(is.numeric, function(x) ifelse(is.infinite(x), 0, x))
-# medians_df[!is.finite(medians_df)] <- 0
-medians_df %>%
-  ggplot(aes(x = neuro_type, color = site)) +
-  # geom_point() +
-  geom_pointrange(
-    size = 0.2,
-    aes(
-      y = median_val,
-      ymin = min_val,
-      ymax = max_val
-    ),
-    position = position_dodge2(width = 0.8)
-  ) +
-  facet_grid(rows = vars(grouped_var), scales = "free") +
-  # scale_color_brewer(palette = "Dark2") +
-  rcartocolor::scale_color_carto_d() +
-  labs(y = "Median [Min, Max]", x = "Neurological conditions")
-```
-
-
-```{r fig.height=10}
-alpha_threshold <- qnorm(0.975)
-means_df <- combined_other_table_wide %>%
-  filter(grepl("Mean", name)) %>%
-  pivot_longer(None:Central, names_to = "neuro_type") %>%
-  replace_na(list(value = "0 (0)")) %>%
-  mutate(
-    mean_val = as.numeric(gsub(" \\([^()]*\\)", "", value)),
-    se_val = as.numeric(gsub("\\(([^()]*)\\)|.", "\\1", value, perl = T)),
-    grouped_var = gsub("Mean |Median | \\[Min, Max\\]| \\(SD\\)", "", name)
-  )
-means_df %>%
-  ggplot(aes(x = neuro_type, color = site)) +
-  geom_pointrange(
-    size = 0.2,
-    aes(
-      x = neuro_type, y = mean_val,
-      ymin = mean_val - alpha_threshold * se_val,
-      ymax = mean_val + alpha_threshold * se_val,
-    ),
-    position = position_dodge2(width = 0.8)
-  ) +
-  facet_grid(rows = vars(grouped_var), scales = "free") +
-  rcartocolor::scale_color_carto_d() +
-  labs(y = "Mean [95% CI]", x = "Neurological conditions")
-```
 
 ```{r}
 vars_to_process <- unique(combined_other_table_wide$name)
@@ -228,46 +200,6 @@ other_table_compiled <- bind_rows(processed_list, .id = "Table 1") %>%
   select(`Table 1`, N, None, Peripheral, Central)
 ```
 
-```{r}
-processed_list_figs <- list()
-for (i in vars_to_process) {
-  mod_table <- combined_other_table_wide %>%
-    rename("var" = name) %>%
-    filter(var == i) %>%
-    mutate(
-      site = toupper(site),
-      None = sub("(\\(.*|\\[.*)", "", None),
-      Peripheral = sub("(\\(.*|\\[.*)", "", Peripheral),
-      Central = sub("(\\(.*|\\[.*)", "", Central)
-    ) %>%
-    mutate(across(None:Central, as.numeric))
-
-  processed_list_figs[[i]] <- mod_table
-}
-
-other_table_for_figs <- bind_rows(processed_list_figs)
-```
-
-**Site Level Results**
-
-```{r echo=FALSE,message=FALSE, warning=FALSE, fig.height=10}
-other_table_for_figs %>%
-  mutate(
-    me = stringr::word(var),
-    grouped_var = gsub("Mean |Median | \\[Min, Max\\]| \\(SD\\)", "", var)
-  ) %>%
-  pivot_longer(
-    cols = None:Central,
-    names_to = "type"
-  ) %>%
-  mutate(type = factor(type, levels = c("None", "Central", "Peripheral"))) %>%
-  ggplot(aes(y = value, x = type, fill = site)) +
-  facet_grid(vars(grouped_var), vars(me), scales = "free") +
-  geom_bar(stat = "identity", position = "dodge", colour = "black") +
-  #scale_fill_brewer(palette = "Dark2") +
-  labs(x = NULL, y = NULL, fill = NULL)
-```
-
 ## Table One
 
 ```{r}
@@ -288,14 +220,15 @@ row_order <- c(
   "26-49", "50-69", "70-79", "80+", "Unknown",
   "American Indian", "Asian", "Black",
   "Hawaiian/Pacific Islander",
-  "Hispanic/Latino", "Other", "White",
+  "Hispanic/Latino", "White", "Other",
   "Median Elixhauser score [Min, Max]",
-  "Median time to first discharge [Min, Max]",
-  "Median time to last discharge [Min, Max]",
+  "Median pre admission cns [Min, Max]",
+  "Median pre admission pns [Min, Max]",
   "Non-Severe", "Severe",
   "Median time to severe [Min, Max]",
   "Alive", "Deceased", 
   "Median time to death [Min, Max]",
+  "Median time to first discharge [Min, Max]",
   "Not Readmitted", "Readmitted",
   "Median time to first readmission [Min, Max]",
   "Median number of readmissions [Min, Max]"
@@ -306,11 +239,6 @@ get_table_n <- function(var) {
     filter(`Table 1` == var) %>%
     pull(N)
 }
-
-# had problems with race.Other and sex.Other 
-# if sex.Other == 0, we will exclude
-tableOne_inter <- tableOne_inter %>% 
-  filter(!variable == "sex.other")
 
 tableOne_raw <- tableOne_inter %>%
   filter(Demo_var == "sex") %>%
@@ -350,12 +278,18 @@ tableOne_compiled <- tableOne_raw %>%
     N = case_when(
       grepl("Median time to first discharge", `Table 1`) ~ get_table_n("All Patients"),
       grepl("Median time to last discharge", `Table 1`) ~ get_table_n("All Patients"),
+      grepl("Median time to severe", `Table 1`) ~ get_table_n("Severe"),
       grepl("death", `Table 1`) ~ get_table_n("Deceased"),
       grepl("readmission", `Table 1`) ~ get_table_n("Readmitted"),
       grepl("Median Elixhauser score", `Table 1`) ~ get_table_n("All Patients"),
       TRUE ~ N
     )
-  )
+  ) %>% 
+  mutate(N = if_else(`Table 1` == "Median pre admission pns [Min, Max]" | `Table 1` == "Median pre admission cns [Min, Max]", 
+              get_table_n("All Patients"), N))
+
+tableOne_compiled <- tableOne_compiled %>% 
+  select(`Table 1`, N, None, Central, Peripheral) 
 
 kbl(tableOne_compiled) %>%
   add_header_above(c(
@@ -365,15 +299,14 @@ kbl(tableOne_compiled) %>%
   )) %>%
   kable_paper("striped", full_width = F) %>%
   pack_rows("Sex", 2, 3) %>%
-  pack_rows("Age", 4, 12) %>%
-  pack_rows("Race & Ethnicity", 13, 19) %>%
-  pack_rows("Past Medical History", 20, 20) %>%
-  pack_rows("Length of Stay", 21, 22) %>%
-  pack_rows("Severity", 23, 25) %>%
-  pack_rows("Survival", 26, 28) %>%
-  pack_rows("Readmission", 29, 32)
+  pack_rows("Age", 4, 13) %>%
+  pack_rows("Race & Ethnicity", 14, 20) %>%
+  pack_rows("Past Medical History", 21, 23) %>%
+  pack_rows("Severity", 24, 26) %>%
+  pack_rows("Survival", 27, 29) %>%
+  pack_rows("Discharge & Readmission", 30, 34)
 
-write.csv(tableOne_compiled, "demo_results/Table1.csv", row.names = FALSE)
+write.csv(tableOne_compiled, "manuscript/Table1.csv", row.names = FALSE)
 ```
 
 ```{r fig.height=15, fig.width=11}
@@ -386,6 +319,211 @@ combined_table <- combined_table_wide %>%
   replace_na(list(Count = 0)) %>%
   mutate(Dx = gsub("n_var_", "", Dx) %>%
     fct_relevel(c("None", "Central", "Peripheral")))
+```
+
+### Evaluate demographic/clinical characteristics among neurostatus groups
+
+```{r}
+# total patients
+N = tableOne_compiled %>% select(N) %>% head(1) %>% as.numeric()
+
+# sum of all neuro condition groups
+cns_n = as.numeric(gsub( " .*$", "", tableOne_compiled[1,"Central"]))
+pns_n = as.numeric(gsub( " .*$", "", tableOne_compiled[1,"Peripheral"]))
+none_n = as.numeric(gsub( " .*$", "", tableOne_compiled[1,"None"]))
+
+vars = tableOne_inter$variable
+
+# for binary variables, we should group. 
+# Thus, only run the analysis for sex.male rather than both sex.female AND sex.male which would be duplicative
+
+exclude <- c("readmitted.false", "sex.female", "survival.deceased", "severity.non-severe")
+
+vars <- vars[!vars %in% exclude]
+
+calc_chisq <- function(var) {
+  
+  # define matrix for each variable
+  mat <- tableOne_inter %>% 
+  filter(variable == paste(var)) %>% 
+  select(starts_with("n_var")) %>% 
+  mutate(none_dif = none_n - n_var_None,
+         pns_dif = pns_n - n_var_Peripheral, 
+         cns_dif = cns_n - n_var_Central) %>% 
+  as.integer() %>% 
+  matrix(nrow = 2, ncol = 3, byrow = TRUE) 
+
+  result <- chisq.test(unlist(mat))
+  
+}
+
+chi_result_list = list()
+
+for(i in vars) {
+  
+  print(i)
+  
+  test = calc_chisq(i)
+  X2 <- round(test$statistic, 4)
+  p_value <- test$p.value
+  df <- test$parameter
+  Variable = paste(i)
+  
+  results <- cbind(Variable, X2, p_value, df) %>% 
+    data.frame() 
+  
+  rownames(results) <- NULL
+  
+  chi_result_list[[i]] <- results
+}
+
+chisq_results <- bind_rows(chi_result_list)
+```
+
+Anova tests for continuous variables
+
+```{r}
+processed_list_figs <- list()
+for (i in vars_to_process) {
+  mod_table <- combined_other_table_wide %>%
+    rename("var" = name) %>%
+    filter(var == i) %>%
+    mutate(
+      site = toupper(site),
+      None = sub("(\\(.*|\\[.*)", "", None),
+      Peripheral = sub("(\\(.*|\\[.*)", "", Peripheral),
+      Central = sub("(\\(.*|\\[.*)", "", Central)
+    ) %>%
+    mutate(across(None:Central, as.numeric))
+
+  processed_list_figs[[i]] <- mod_table
+}
+
+other_table_for_figs <- bind_rows(processed_list_figs)
+
+# format the continuous variables
+cont_vars = other_table_for_figs %>%
+  mutate(
+    me = stringr::word(var),
+    grouped_var = gsub("Mean |Median | \\[Min, Max\\]| \\(SD\\)", "", var)
+  ) %>%
+  pivot_longer(
+    cols = None:Central,
+    names_to = "type"
+  ) %>%
+  mutate(type = factor(type, levels = c("None", "Central", "Peripheral"))) %>% 
+  filter(me == "Median",
+         grouped_var %in% c("Elixhauser score",
+                            "pre admission cns", 
+                            "pre admission pns", 
+                            "time to death", 
+                            "time to first discharge", 
+                            "time to severe",
+                            "number of readmissions",
+                            "time to first readmission")) %>% 
+  distinct()
+
+# anova
+cont_var_results <- function(variable) {
+  
+  df <- cont_vars %>% 
+  filter(grouped_var == paste(variable))
+  
+  # kruskal.test calculates the kruskal-Wallis H-statistic to compare the means (or is it medians?);
+  # does not assume normality between groups
+  # also called the one-way ANOVA on ranks
+  test = kruskal.test(df$value ~ df$type)
+  
+}
+
+cont_vars_list = list()
+
+outcome_cont_vars = unique(cont_vars$grouped_var)
+
+for(i in outcome_cont_vars) {
+  
+  test = cont_var_results(i)
+  X2 <- round(test$statistic, 4)
+  p_value <- test$p.value
+  df <- test$parameter
+  Variable = paste(i)
+  
+  results <- cbind(Variable, X2, p_value, df) %>% 
+    data.frame() 
+  
+  rownames(results) <- NULL
+  
+  cont_vars_list[[i]] <- results
+
+  
+}
+
+anova_results <- bind_rows(cont_vars_list)
+```
+
+Combine chisquare and anova results
+
+```{r}
+demo_stats <- rbind(chisq_results %>% select(Variable, p_value),
+                    anova_results %>% select(Variable, p_value))
+
+# adjust p-values with FDR
+demo_stats$adj_p_value <- p.adjust(demo_stats$p_value, method = "fdr")
+
+demo_stats <- demo_stats %>% 
+  mutate(p_value = as.numeric(p_value),
+         pvalue = if_else(p_value < 0.001, "< 0.001", paste(round(p_value, 3))),
+         adj.p_value = if_else(adj_p_value < 0.001, "< 0.001", paste(round(adj_p_value, 3))))
+
+write.csv(demo_stats, "manuscript/Table1_pvals.csv", row.names = FALSE)
+```
+
+Evaluate anova results
+
+```{r}
+# https://rcompanion.org/rcompanion/d_06.html
+# Dunn test for multiple comparisons
+library(rcompanion)
+library(FSA)
+discharge = cont_vars %>% filter(grouped_var == "time to first discharge")
+pos_hoc = dunnTest(discharge$value ~ discharge$type,
+              data=discharge,
+              method="bh")
+
+pos_hoc <- pos_hoc$res
+pos_hoc
+
+my_comparisons <- list(c("None", "Central"), 
+                    c("None", "Peripheral"), 
+                    c("Central", "Peripheral"))
+
+plot_discharge <- ggplot(cont_vars %>% 
+         filter(grouped_var == "time to first discharge"), 
+       aes(x = type, y = value, fill = type)) + 
+  geom_boxplot() + 
+  theme_bw()
+
+plot_discharge + stat_compare_means(test = "kruskal.wallis", label.y = 100) + 
+  stat_compare_means(comparisons = my_comparisons, method = "wilcox")
+
+
+plot_elix <- ggplot(cont_vars %>% 
+         filter(grouped_var == "Elixhauser score"), 
+       aes(x = type, y = value, fill = type)) + 
+  geom_boxplot() + 
+  theme_bw()
+
+plot_elix + stat_compare_means(test = "kruskal.wallis", label.y = 20) + 
+  stat_compare_means(comparisons = my_comparisons, method = "wilcox")
+
+elix_score = cont_vars %>% filter(grouped_var == "Elixhauser score")
+
+pos_hoc = dunnTest(elix_score$value ~ elix_score$type,
+              data=elix_score,
+              method="bh")
+
+pos_hoc <- pos_hoc$res
+pos_hoc
 ```
 
 ### Diagnoses
@@ -426,7 +564,7 @@ icds <- rbind(neuro_icds_10, neuro_icds_9)
 
 diag_table_list <- list()
 
-for (i in results) {
+for (i in sorted_sites) {
   tmp <- get(i)
   tmp_diag <- tmp[[c(
     "first_hosp_results",
@@ -443,47 +581,100 @@ diag_table_wide <- bind_rows(diag_table_list)
 
 
 diag_counts <- colSums(Filter(is.numeric, diag_table_wide), na.rm = TRUE) %>% 
-  data.frame()
+  data.frame() %>% 
+  mutate(perc = round(./N * 100, 1))
 
 diag_counts <- tibble::rownames_to_column(diag_counts, "icd") %>%
   mutate(icd = gsub("n_var_", "", icd)) %>%
-  rename("sum_neuro_icd" = ".") %>%
-  left_join(., icds, by = "icd") %>%
-  group_by(`Neurological Disease Category`) %>%
-  mutate(sum_neuro_cat = sum(sum_neuro_icd)) %>%
-  arrange(desc(sum_neuro_cat)) %>% 
-  ungroup() %>% 
-  select(icd, `Neurological Disease Category`, 
-         pns_cns, description, concept_type, sum_neuro_icd,
-         sum_neuro_cat)
+  rename(`Number of Patients` = ".") %>%
+  full_join(., icds, by = "icd") %>%
+  dplyr::arrange(desc(`Number of Patients`)) %>% 
+  mutate(`Number of Patients (% of Cohort)` = paste(`Number of Patients`, "(", perc, ")", sep = " ")) %>% 
+  select(pns_cns, `Neurological Disease Category`, concept_type, 
+         icd, description, `Number of Patients (% of Cohort)`) %>% 
+    rename(Code = "icd",
+         `Nervous System` = "pns_cns",
+         Description = "description",
+         `ICD Version` = "concept_type") %>% 
+  mutate(`Number of Patients (% of Cohort)` = if_else(`Number of Patients (% of Cohort)` == "NA ( NA )", "0 ( 0 )", `Number of Patients (% of Cohort)`))
 
 datatable(diag_counts)
 
-write.csv(diag_counts, "demo_results/neuro_codes_table.csv", row.names = FALSE)
-```
-
-### Top Central ICD Codes
-
-```{r}
-datatable(diag_counts %>% filter(pns_cns == "Central") %>% head(5))
-```
-
-### Top Peripheral ICD Codes
-
-```{r}
-datatable(diag_counts %>% filter(pns_cns == "Peripheral") %>% head(5))
+write.csv(diag_counts, "Manuscript/Supp.Table2_diagnoses.csv", row.names = FALSE)
 ```
 
 ### Comordities
 
 Stratified by CPNS Diseases
 
-*Note: Diabetes is duplicated. We will choose 1.*
+*Note: Diabetes is duplicated. We will choose 1 of the diabetes codes.*
+
+**List from ICD package icd/data/mappingNames
+
+```{r}
+# HTN marked together as combined, but DM not.
+names_elix_htn <- list(
+  "01" = "Congestive heart failure",
+  "02" = "Cardiac arrhythmias",
+  "03" = "Valvular disease",
+  "04" = "Pulmonary circulation disorders",
+  "05" = "Peripheral vascular disorders",
+  "06a" = "Hypertension, uncomplicated",
+  "06b" = "Hypertension, complicated",
+  "07" = "Paralysis",
+  "08" = "Other neurological disorders",
+  "09" = "Chronic pulmonary disease",
+  "10" = "Diabetes, uncomplicated",
+  "11" = "Diabetes, complicated",
+  "12" = "Hypothyroidism",
+  "13" = "Renal failure",
+  "14" = "Liver disease",
+  "15" = "Peptic ulcer disease excluding bleeding",
+  "16" = "HIV/AIDS",
+  "17" = "Lymphoma",
+  "18" = "Metastatic cancer",
+  "19" = "Solid tumor without metastasis",
+  "20" = "Rheumatoid arthritis/collagen vascular diseases",
+  "21" = "Coagulopathy",
+  "22" = "Obesity",
+  "23" = "Weight loss",
+  "24" = "Fluid and electrolye disorders",
+  "25" = "Blood loss anemia",
+  "26" = "Deficiency anemias",
+  "27" = "Alcohol abuse",
+  "28" = "Drug abuse",
+  "29" = "Psychoses",
+  "30" = "Depression"
+)
+
+# Elixhauser with HTN combined:
+comorb_list <- names_elix_htn
+comorb_list["06b"] <- NULL
+comorb_list["06a"] <- "Hypertension, combined"
+names(comorb_list)[6] <- "06"
+
+Comorbidity <- unlist(comorb_list)
+Comorbidity <- as.data.frame(Comorbidity)
+
+Comorbidity <- tibble::rownames_to_column(Comorbidity, "Abbreviation")
+
+```
 
 ```{r}
 comorb_table_list <- list()
 
-for (i in results) {
+# modify BCH
+BCH_results[["first_hosp_results"]][["cpns_results"]][["elix_obfus_table1"]][["Comorbidity"]]  
+
+df <- BCH_results[["first_hosp_results"]][["cpns_results"]][["elix_obfus_table1"]] %>% 
+  arrange(Abbreviation) %>% 
+  select(-Comorbidity) %>% 
+  left_join(., Comorbidity, by = "Abbreviation")
+
+BCH_results[["first_hosp_results"]][["cpns_results"]][["elix_obfus_table1"]] <- df
+
+
+for (i in sorted_sites) {
   tmp <- get(i)
   tmp_comorb <- tmp[[c(
     "first_hosp_results",
@@ -496,138 +687,45 @@ for (i in results) {
     mutate(Comorbidity = if_else(Comorbidity == "Diabetes, complicated", "Diabetes", Comorbidity)) %>% 
     select(site, Comorbidity,  n_Total, n_None, n_Central, n_Peripheral)
 }
+
 comorb_table_wide <- bind_rows(comorb_table_list) %>% 
   data.frame() %>% 
   group_by(Comorbidity) %>% 
   mutate(Comorb_Total = sum(n_Total, na.rm = TRUE),
-         Comorb_Perc = round(Comorb_Total/as.numeric(tableOne_compiled[1,2])*100, 1)) %>% 
+         Comorb_Perc = round(Comorb_Total/as.numeric(tableOne_compiled[1,"N"])*100, 1)) %>% 
   arrange(desc(Comorb_Perc)) %>% 
   mutate(None_Total = sum(n_None, na.rm = TRUE),
-         None_Perc = round(None_Total/as.numeric(gsub( " .*$", "", tableOne_compiled[1,3]))*100, 1),
+         None_Perc = round(None_Total/as.numeric(gsub( " .*$", "", tableOne_compiled[1,"None"])) * 100, 1),
          CNS_Total = sum(n_Central, na.rm = TRUE),
-         CNS_Perc = round(CNS_Total/as.numeric(gsub( " .*$", "", tableOne_compiled[1,5]))*100, 1),
+         CNS_Perc = round(CNS_Total/as.numeric(gsub( " .*$", "", tableOne_compiled[1,"Central"])) * 100, 1),
          PNS_Total = sum(n_Peripheral, na.rm = TRUE),
-         PNS_Perc = round(PNS_Total/as.numeric(gsub( " .*$", "", tableOne_compiled[1,4]))*100, 1),
+         PNS_Perc = round(PNS_Total/as.numeric(gsub( " .*$", "", tableOne_compiled[1,"Peripheral"])) * 100, 1),
          Comorb_Total = paste(Comorb_Total, "(", Comorb_Perc, ")"),
          None_Total = paste(None_Total, "(", None_Perc, ")"),
          CNS_Total = paste(CNS_Total, "(", CNS_Perc, ")"),
          PNS_Total = paste(PNS_Total, "(", PNS_Perc, ")")) %>% 
-  distinct(Comorbidity, Comorb_Total, None_Total, CNS_Total, PNS_Total) %>% 
+  distinct(Comorbidity, Comorb_Total, None_Total, CNS_Total, PNS_Total, None_Perc, CNS_Perc, PNS_Perc) %>% 
   ungroup()
 
 datatable(comorb_table_wide)
 
-
 write.csv(comorb_table_wide, "demo_results/comorbidity_table_cnps.csv", row.names = FALSE)
-```
-
-Stratified by Neuro vs non-Neuro
-
-```{r}
-comorb_table_list <- list()
-
-# sum of all neuro patients
-cns_n = as.numeric(gsub( " .*$", "", tableOne_compiled[1,5]))
-pns_n = as.numeric(gsub( " .*$", "", tableOne_compiled[1,4]))
-
-neuro_n = sum(cns_n, pns_n)
-patients_none = as.numeric(gsub( " .*$", "", tableOne_compiled[1,3]))
-
-for (i in results) {
-  tmp <- get(i)
-  tmp_comorb <- tmp[[c(
-    "first_hosp_results",
-    "binary_results",
-    "elix_obfus_table1"
-  )]]
-  tmp_comorb$site <- tmp[["site"]]
-  comorb_table_list[[i]] <- tmp_comorb %>%
-    filter(!Comorbidity == "Diabetes, uncomplicated") %>% 
-    mutate(Comorbidity = if_else(Comorbidity == "Diabetes, complicated", "Diabetes", Comorbidity)) %>% 
-    select(site, Comorbidity,  n_Total, n_no_neuro_cond, n_neuro_cond)
-}
-comorb_table_wide_binary <- bind_rows(comorb_table_list) %>% 
-  data.frame() %>% 
-  group_by(Comorbidity) %>% 
-  mutate(Comorb_Total = sum(n_Total, na.rm = TRUE),
-         Comorb_Perc = round(Comorb_Total/as.numeric(tableOne_compiled[1,2])*100, 1),
-         None_Total = sum(n_no_neuro_cond, na.rm = TRUE),
-         None_Perc = round(None_Total/patients_none*100, 1),
-         Neuro_Total = sum(n_neuro_cond, na.rm = TRUE),
-         Neuro_Perc = round(Neuro_Total/neuro_n*100, 1)) %>% 
-  distinct(Comorbidity, Comorb_Total, Comorb_Perc, None_Total, None_Perc, Neuro_Total, Neuro_Perc) %>% 
-  select(Comorbidity, Comorb_Total, Comorb_Perc, None_Total, None_Perc, Neuro_Total, Neuro_Perc) %>% 
-  arrange(desc(Comorb_Perc)) %>% 
-  ungroup()
-
-
-
-datatable(comorb_table_wide_binary)
-
-write.csv(comorb_table_wide_binary, "demo_results/comorbidity_table.csv", row.names = FALSE)
-
-```
-
-**Chi-square analysis**
-
-```{r}
-list_of_comorbs <- comorb_table_wide_binary$Comorbidity
-
-chi_result_list <- list()
-
-for (i in list_of_comorbs) {
-  
-  comorb <- comorb_table_wide_binary %>% filter(Comorbidity == paste(i))
-  
-  build_mat <- comorb %>% 
-    select(None_Total, Neuro_Total) %>% 
-    mutate(NoNeuro_Comorb = neuro_n - Neuro_Total,
-           NoNone_Comorb = patients_none - None_Total) %>% 
-    select(Neuro_Total, NoNeuro_Comorb, None_Total, NoNone_Comorb) %>% 
-    as.character()
-  
-  mat <- matrix(as.numeric(build_mat), nrow = 2, ncol = 2)
-  chi_result <- chisq.test(mat,correct=FALSE) # Yate's correction may make more of a different with smaller sample size - no large differences appearant when I compared results
-  
-  pval <- chi_result$p.value 
-  x2 <- chi_result$statistic
-  chi_results <- data.frame("Comorbidity" = paste(i), "X-squared" = x2, "P-value" = pval)
-  
-  chi_result_list[[i]] <- chi_results
-  
-}
-
-chi_result_table <- bind_rows(chi_result_list)
-```
-
-Significance when correcting for Bonferroni
-
-p-value = 0.05/(29 comorbs (we collapsed two diabetes into one) 
-
-```{r}
-pval_adj = 0.05/29
-pval_adj
-
-chi_result_table <- chi_result_table %>% 
-  mutate(sig_adj_pval = ifelse(P.value < pval_adj, 1, 0)) %>% 
-  arrange(desc(X.squared)) %>%  
-  left_join(., comorb_table_wide_binary %>% 
-                                select(Comorbidity, None_Total, None_Perc, Neuro_Total, Neuro_Perc), by = "Comorbidity") %>% 
-  mutate(None_Perc = paste(None_Total, "(", None_Perc, ")"),
-         Neuro_Perc = paste(Neuro_Total, "(", Neuro_Perc, ")")) %>% 
-  select(Comorbidity, None_Perc, Neuro_Perc, X.squared, P.value, sig_adj_pval) %>% 
-  rename(No_Neuro_Perc = "None_Perc")
-
-write.csv(chi_result_table, "demo_results/chi_square_comorb_results.csv", row.names = FALSE)
 ```
 
 ### CNS vs PNS vs None Analysis
 
 ```{r}
+# sum of all neuro patients
+cns_n = as.numeric(gsub( " .*$", "", tableOne_compiled[1,"Central"]))
+pns_n = as.numeric(gsub( " .*$", "", tableOne_compiled[1,"Peripheral"]))
+
+neuro_n = sum(cns_n, pns_n)
+
+patients_none = as.numeric(gsub( " .*$", "", tableOne_compiled[1,"None"]))
+
 comorb_table_list <- list()
 
-
-for (i in results) {
+for (i in sorted_sites) {
   tmp <- get(i)
   tmp_comorb <- tmp[[c(
     "first_hosp_results",
@@ -640,11 +738,28 @@ for (i in results) {
     mutate(Comorbidity = if_else(Comorbidity == "Diabetes, complicated", "Diabetes", Comorbidity)) %>% 
     select(site, Comorbidity,  n_Total, n_None, n_Peripheral, n_Central)
 }
+
+
+comorb_by_site <- bind_rows(comorb_table_list) %>% 
+  data.frame() %>% 
+  group_by(Comorbidity) %>% 
+  mutate(Comorb_Total = sum(n_Total, na.rm = TRUE),
+         Comorb_Perc = round(Comorb_Total/as.numeric(tableOne_compiled[1,"N"])*100, 1),
+         None_Total = sum(n_None, na.rm = TRUE),
+         None_Perc = round(None_Total/patients_none*100, 1),
+         CNS_Total = sum(n_Central, na.rm = TRUE),
+         CNS_Perc = round(CNS_Total/cns_n*100, 1),
+         PNS_Total = sum(n_Peripheral, na.rm = TRUE),
+         PNS_Perc = round(PNS_Total/pns_n*100, 1))
+  
+write.csv(comorb_by_site, "demo_results/comorbidities_by_site.csv", row.names = FALSE)
+
+
 comorb_table_wide_stratified <- bind_rows(comorb_table_list) %>% 
   data.frame() %>% 
   group_by(Comorbidity) %>% 
   mutate(Comorb_Total = sum(n_Total, na.rm = TRUE),
-         Comorb_Perc = round(Comorb_Total/as.numeric(tableOne_compiled[1,2])*100, 1),
+         Comorb_Perc = round(Comorb_Total/as.numeric(tableOne_compiled[1,"N"])*100, 1),
          None_Total = sum(n_None, na.rm = TRUE),
          None_Perc = round(None_Total/patients_none*100, 1),
          CNS_Total = sum(n_Central, na.rm = TRUE),
@@ -656,14 +771,12 @@ comorb_table_wide_stratified <- bind_rows(comorb_table_list) %>%
   arrange(desc(Comorb_Perc)) %>% 
   ungroup()
 
-
+write.csv(comorb_table_wide_stratified, "demo_results/comorbidities_grouped.csv", row.names = FALSE)
 
 datatable(comorb_table_wide_stratified)
-
-write.csv(comorb_table_wide_stratified, "demo_results/comorbidity_table_statified.csv", row.names = FALSE)
 ```
 
-**Chi-square analysis**
+**Chi-square analysis - None vs CNS vs PNS**
 
 ```{r}
 list_of_comorbs <- comorb_table_wide_stratified$Comorbidity
@@ -683,7 +796,7 @@ for (i in list_of_comorbs) {
     as.character()
   
   mat <- matrix(as.numeric(build_mat), nrow = 2, ncol = 3)
-  chi_result <- chisq.test(mat,correct=FALSE) # Yate's correction may make more of a different with smaller sample size - no large differences appearant when I compared results
+  chi_result <- chisq.test(mat, correct=FALSE) # Yate's correction may make more of a different with smaller sample size - no large differences appearant when I compared results
   
   pval <- chi_result$p.value 
   x2 <- chi_result$statistic
@@ -713,269 +826,188 @@ chi_result_table <- chi_result_table %>%
          CNS_Perc = paste(CNS_Total, "(", CNS_Perc, ")"),
          PNS_Perc = paste(PNS_Total, "(", PNS_Perc, ")")) %>% 
   select(Comorbidity, None_Perc, CNS_Perc, PNS_Perc, X.squared, P.value, sig_adj_pval) %>% 
-  rename(No_Neuro_Perc = "None_Perc")
+  rename(No_Neuro_Perc = "None_Perc") %>% 
+  mutate(P.value = if_else(P.value < 0.001, "< 0.001", paste(round(P.value, 3))),
+         X.squared = round(X.squared, 1))
 
 write.csv(chi_result_table, "demo_results/chi_square_comorb_stratified_results.csv", row.names = FALSE)
 ```
 
-## Figures
+### Calculate relative risk for each comorbidity
 
-```{r echo=T, message=FALSE, warning=FALSE, results='hide'}
-race_dx <- combined_table %>%
-  filter(Demo_var == "race") %>%
-  mutate(Demo_var_i = as.factor(Demo_var_i))
+For each comorbidity, calculate the risk of each neuro group for having the comorbidity. 
 
-age_dx <- combined_table %>%
-  filter(Demo_var == "age_group") %>%
-  mutate(Demo_var_i = as.factor(Demo_var_i))
-```
+e.g, Risk of having hypertension in CNS group = `number of CNS patients with hypertension` / `total number of CNS patients`
 
-```{r gender-plot}
-showtext::showtext_auto()
-female <- intToUtf8(9792)
-male <- intToUtf8(9794)
-gender_count <- combined_table %>%
-  filter(Demo_var == "sex") %>%
-  group_by(site, Demo_var_i) %>%
-  summarise(total_count = sum(Count, na.rm = TRUE), .groups = "drop")
-
-gender_plot <- gender_count %>%
-  mutate(total_count = if_else(Demo_var_i == "Male", -total_count, total_count)) %>%
-  ggplot(aes(
-    y = fct_relevel(site, sorted_sites),
-    x = total_count, color = Demo_var_i
-  )) +
-  geom_col(position = "identity", fill = "grey70") +
-  scale_color_manual(values = c("white", "white")) +
-  scale_x_continuous(
-    breaks = c(-10000, -5000, -2000, 0, 2000, 5000),
-    labels = c(10000, 5000, 2000, 0, 2000, 5000),
-    trans = ggallin::ssqrt_trans
-  ) +
-  geom_vline(xintercept = 0, color = "white") +
-  geom_text(
-    data = . %>% filter(Demo_var_i == "Male"),
-    aes(
-      y = site, x = total_count - 6 * sqrt(abs(total_count)),
-      label = abs(total_count)
-    ), color = "grey10", size = 3
-  ) +
-  geom_text(
-    data = . %>% filter(Demo_var_i == "Female"),
-    aes(
-      y = site, x = total_count + 7 * sqrt(abs(total_count)),
-      label = abs(total_count)
-    ), color = "grey10", size = 3
-  ) +
-  geom_text(
-    data = . %>% filter(site == "VA5", Demo_var_i == "Female"),
-    aes(y = length(sorted_sites), x = total_count - 50), fontface = 2,
-    label = female, size = 3, color = "white"
-  ) +
-  geom_text(
-    data = . %>% filter(site == "VA5", Demo_var_i == "Male"),
-    aes(y = length(sorted_sites), x = total_count + 200), fontface = 2,
-    label = male, size = 3, color = "white"
-  ) +
-  labs(
-    y = NULL,
-    x = "Number of male/female patients per site",
-    fill = NULL
-  ) +
-  theme(
-    legend.position = "None",
-    # plot.margin = margin(15, 5.5, 15.5, 55.5),
-    axis.ticks.y = element_blank(),
-    panel.grid.major.y = element_blank(),
-    panel.grid.minor = element_blank(),
-    panel.border = element_blank(),
-    panel.spacing.y = unit(0, "pt"),
-    strip.background = element_blank(),
-    strip.placement = "inside",
-    legend.background = element_blank(),
-    legend.key.height = unit(1, "line"),
-    legend.title = element_text(hjust = 0, size = 9)
-  ) +
-  NULL
-```
-
-```{r age-plot}
-age_sum <- age_dx %>%
-  filter(Demo_var == "age_group") %>%
-  mutate(Demo_var_i = fct_relevel(
-    Demo_var_i,
-    c(
-      "0-2",
-      "3-5",
-      "6-11",
-      "12-17",
-      "18-25",
-      "26-49",
-      "50-69",
-      "70-79",
-      "80+"
-    )
-  )) %>%
-  select(site, Demo_var_i, Dx, Count) %>%
-  distinct() %>%
-  group_by(site, Demo_var_i) %>%
-  summarise(
-    total_count = sum(Count, na.rm = TRUE),
-    .groups = "drop"
-  ) %>%
-  group_by(site) %>%
-  mutate(freq = total_count / sum(total_count, na.rm = TRUE))
-
-cc <- scales::seq_gradient_pal("white", "#25796C")(seq(0, 1, length.out = 11))[-1]
-
-age_plot <- age_sum %>%
-  mutate(Demo_var_i = Demo_var_i %>% fct_relevel("Other", after = 0)) %>%
-  ggplot(aes(
-    # y = fct_reorder(site, freq * (1 + 20 * (Demo_var_i == "80+"))),
-    y = fct_reorder2(site, Demo_var_i, -freq),
-    x = freq, fill = fct_rev(Demo_var_i)
-  )) +
-  geom_col() +
-  # scale_fill_viridis_d(direction = -1, option = 'D') +
-  scale_fill_manual(values = cc) +
-  scale_x_continuous(labels = scales::percent_format()) +
-  labs(x = "Age group proportion", y = NULL, fill = NULL) +
-  guides(fill = guide_legend(nrow = 1, reverse = TRUE)) +
-  coord_cartesian(expand = FALSE) +
-  theme(legend.position = "top") +
-  theme(
-    panel.grid = element_blank(),
-    legend.key.height = unit(3, "mm")
-  ) +
-  NULL
-```
-
-```{r race-plot}
-race_sum <- race_dx %>%
-  mutate(Demo_var_i = fct_relevel(
-    Demo_var_i,
-    c(
-      "Other",
-      "Hawaiian/Pacific Islander",
-      "American Indian",
-      "Hispanic/Latino",
-      "Asian",
-      "Black",
-      "White"
-    )
-  )) %>%
-  filter(Demo_var == "race", !site %in% sites_wo_race) %>%
-  select(site, Demo_var_i, Dx, Count) %>%
-  distinct() %>%
-  group_by(site, Demo_var_i) %>%
-  summarise(
-    total_count = sum(Count, na.rm = TRUE),
-    .groups = "drop"
-  ) %>%
-  group_by(site) %>%
-  mutate(freq = total_count / sum(total_count, na.rm = TRUE))
-
-race_plot <- race_sum %>%
-  ggplot(aes(
-    y = fct_reorder2(site, Demo_var_i, freq),
-    x = freq,
-    fill = fct_rev(Demo_var_i)
-  )) +
-  geom_col() +
-  rcartocolor::scale_fill_carto_d(palette = 6) +
-  scale_x_continuous(labels = scales::percent_format()) +
-  labs(x = "Race/ethnic group proportion", y = NULL, fill = NULL) +
-  guides(fill = guide_legend(nrow = 1, reverse = TRUE)) +
-  coord_cartesian(expand = FALSE) +
-  theme(legend.position = "top") +
-  theme(
-    panel.grid = element_blank(),
-    legend.key.height = unit(3, "mm")
-  ) +
-  NULL
-```
+We calculate Relative risk by dividing CNS risk / NNC risk
 
 ```{r}
-my_breaks <- function(x) {
-  if (max(x) < 0.2) {
-    NULL
-  } else if (max(x) < 0.8) {
-    seq(0, 1, 0.2)
-  } else {
-    seq(0.2, 1, 0.2)
-  }
+rr_calcs <- list()
+
+for (i in list_of_comorbs) {
+  
+    rr <- comorb_table_wide_stratified %>% 
+    filter(Comorbidity == paste(i)) %>% 
+    mutate(r_None = None_Total/patients_none, 
+           r_CNS = CNS_Total/cns_n,
+           r_PNS = PNS_Total/pns_n,
+           rr_CNS = r_CNS/r_None,
+           rr_PNS = r_PNS/r_None) 
+  
+  rr_calcs[[i]] <- rr
+  
 }
 
-race_plot2 <- race_sum %>%
-  ggplot(aes(
-    # y = fct_reorder2(site, Demo_var_i, freq),
-    y = site,
-    x = freq,
-    fill = fct_rev(Demo_var_i)
-  )) +
-  geom_col() +
-  rcartocolor::scale_fill_carto_d(palette = 6) +
-  scale_x_continuous(
-    breaks = my_breaks,
-    labels = scales::percent_format(accuracy = 1)
-  ) +
-  labs(x = "Race/ethnic group proportion", y = NULL, fill = NULL) +
-  guides(fill = guide_legend(nrow = 1, reverse = TRUE)) +
-  coord_cartesian(expand = FALSE) +
-  theme(legend.position = "top") +
-  facet_grid(cols = vars(Demo_var_i), scales = "free", space = "free") +
-  theme(
-    strip.background = element_blank(),
-    strip.text.x = element_blank(),
-    panel.grid = element_blank(),
-    legend.key.height = unit(3, "mm"),
-    panel.spacing = unit(0, "lines")
-  ) +
-  NULL
-```
+rr_results <- bind_rows(rr_calcs)
 
+## to calculate confidence intervals
+#https://sphweb.bumc.bu.edu/otlt/mph-modules/bs/bs704_confidence_intervals/bs704_confidence_intervals8.html
+
+# exposed group - with outcome, without outcome
+# non exposed group, with outcome, without outcome
+# where variables ending with `_Total` are the total number of CNS, PNS, or NNC patients with the respective comorbidity. variables ending with `_n` are the total numbers in the entire population 
+
+rr_ci_results_list <- list()
+
+for (i in list_of_comorbs) {
+  
+  mat <- rr_results %>% 
+    filter(Comorbidity == paste(i)) %>% 
+    mutate(no_cns_comorb = cns_n - CNS_Total, 
+           no_none_comorb = patients_none - None_Total, 
+           no_pns_comorb = pns_n - PNS_Total) %>% 
+    select(CNS_Total, no_cns_comorb, None_Total, no_none_comorb, rr_CNS, 
+           PNS_Total, no_pns_comorb, rr_PNS)
+      
+  # to calculate CIs
+  #(n1 - x1)/x1  /n1
+  # without outcome / outcome / total
+  
+  ## CNS RR
+  n1 = mat$no_cns_comorb / mat$CNS_Total / cns_n
+  n2 = mat$no_none_comorb / mat$None_Total / patients_none
+  
+  to_square <- sqrt(n1+n2)
+  
+  l_ci <- log(mat$rr_CNS) - (1.96*to_square)
+  u_ci <- log(mat$rr_CNS) + (1.96*to_square)
+  
+  # need to then take the antilog
+  l_ci = exp(l_ci)
+  u_ci = exp(u_ci)
+  
+  cns_rr_results_ci <- data.frame(i, "CNS", mat$rr_CNS, l_ci, u_ci) 
+  colnames(cns_rr_results_ci) <- c("Comorbidity", "Neuro", "RR", "l_CI", "u_CI")
+  
+  ## PNS RR
+  ## CNS RR
+  n1 = mat$no_pns_comorb / mat$PNS_Total / pns_n
+  n2 = mat$no_none_comorb / mat$None_Total / patients_none
+  
+  to_square <- sqrt(n1+n2)
+  
+  l_ci <- log(mat$rr_PNS) - (1.96*to_square)
+  u_ci <- log(mat$rr_PNS) + (1.96*to_square)
+  
+  # need to then take the antilog
+  l_ci = exp(l_ci)
+  u_ci = exp(u_ci)
+  
+  pns_rr_results_ci <- data.frame(i, "PNS", mat$rr_PNS, l_ci, u_ci) 
+  colnames(pns_rr_results_ci) <- c("Comorbidity","Neuro", "RR", "l_CI", "u_CI")
+  
+  rr_results_ci <- rbind(cns_rr_results_ci, pns_rr_results_ci)
+  
+  rr_ci_results_list[[i]] <- rr_results_ci
+}
+
+rr_ci_results <- bind_rows(rr_ci_results_list) 
+
+rr_tidy_table_cns <- rr_ci_results %>% 
+  filter(Neuro == "CNS") %>% 
+  mutate(RR = round(RR, 2),
+         l_CI = round(l_CI, 2),
+         u_CI = round(u_CI, 2)) %>% 
+  arrange(-RR)
+
+rr_tidy_table_pns <- rr_ci_results %>% 
+  filter(Neuro == "PNS") %>% 
+  mutate(RR = round(RR, 2),
+         l_CI = round(l_CI, 2),
+         u_CI = round(u_CI, 2)) %>% 
+  arrange(-RR)
+
+write.csv(rr_tidy_table_cns, "Manuscript/Supp.Table4_RR_cns.csv", row.names = FALSE)
+write.csv(rr_tidy_table_pns, "Manuscript/Supp.Table4_RR_pns.csv", row.names = FALSE)
+```
 
 ```{r}
-age_plot2 <- age_sum %>%
-  mutate(Demo_var_i = Demo_var_i %>% fct_relevel("Other", after = 0)) %>%
-  ggplot(aes(
-    y = site,
-    x = freq, fill = fct_rev(Demo_var_i)
-  )) +
-  geom_col() +
-  # scale_fill_viridis_d(direction = -1, option = 'D') +
-  scale_fill_manual(values = cc) +
-  scale_x_continuous(
-    breaks = my_breaks,
-    labels = scales::percent_format(accuracy = 1)
-  ) +
-  labs(x = "Age group proportion", y = NULL, fill = NULL) +
-  guides(fill = guide_legend(nrow = 1, reverse = TRUE)) +
-  coord_cartesian(expand = FALSE) +
-  facet_grid(cols = vars(Demo_var_i), scales = "free", space = "free") +
-  theme(legend.position = "top") +
-  theme(
-    # strip.background = element_blank(),
-    # strip.text.x = element_blank(),
-    panel.grid = element_blank(),
-    legend.key.height = unit(3, "mm"),
-    panel.spacing = unit(0, "lines")
-  ) +
-  NULL
-age_plot2
+cns_top_results <- rr_ci_results %>% 
+  filter(Neuro == "CNS") %>% 
+  arrange(RR) %>% 
+  select(Comorbidity) 
+
+rr_ci_results$Comorbidity <-  ordered(rr_ci_results$Comorbidity, levels = cns_top_results$Comorbidity)
+
+ggplot(rr_ci_results %>% 
+         group_by(Comorbidity),
+       aes(x = RR, y = Comorbidity, color = Neuro)) +
+  geom_vline(aes(xintercept = 1), size = .25, linetype = "dashed") + 
+    geom_errorbarh(aes(xmax = u_CI, xmin = l_CI), size = 0.5, height = 0.2, color = "gray50") +
+    geom_point(size = 2) + 
+    scale_x_continuous(breaks = seq(0, 4, 1), labels = seq(0, 4, 1),
+                       limits = c(0,4)) + 
+  ylab("") + 
+  xlab("Relative Risk")
+
+svg("manuscript/figures/relative_risk_CNS.svg")
+cns_rr_plot <- ggplot(rr_ci_results %>% 
+         filter(Neuro == "CNS"),
+       aes(x = RR, y = Comorbidity)) +
+  geom_vline(aes(xintercept = 1), size = .25, linetype = "dashed") + 
+    geom_errorbarh(aes(xmax = u_CI, xmin = l_CI), size = 0.5, height = 0.2, color = "gray50") +
+    geom_point(size = 1.5, color = "tomato") + 
+    scale_x_continuous(breaks = seq(0, 4, 1), labels = seq(0, 4, 1),
+                       limits = c(0,4)) + 
+  ylab("") + 
+  xlab("Relative Risk") + 
+  ggtitle("A. CNS Patients") + 
+  theme(axis.text.y = element_text(size = 14),
+        axis.text.x = element_text(size = 12),
+        title = element_text(size = 16, face = "bold"))
+print(cns_rr_plot)
+dev.off()
+
+pns_top_results <- rr_ci_results %>% 
+  filter(Neuro == "PNS") %>% 
+  arrange(RR) %>% 
+  select(Comorbidity) 
+
+rr_ci_results$Comorbidity <-  ordered(rr_ci_results$Comorbidity, levels = pns_top_results$Comorbidity)
+
+svg("manuscript/figures/relative_risk_PNS.svg")
+pns_rr_plot <- ggplot(rr_ci_results %>% 
+         filter(Neuro == "PNS"),
+       aes(x = RR, y = Comorbidity)) +
+  geom_vline(aes(xintercept = 1), size = .25, linetype = "dashed") + 
+    geom_errorbarh(aes(xmax = u_CI, xmin = l_CI), size = 0.5, height = 0.2, color = "gray50") +
+    geom_point(size = 1.5, color = "slateblue") + 
+    scale_x_continuous(breaks = seq(0, 1.5, 0.5), labels = seq(0, 1.5, 0.5),
+                       limits = c(0,1.5)) + 
+  ylab("") + 
+  xlab("Relative Risk") + 
+  ggtitle("B. PNS Patients") + 
+  theme(axis.text.y = element_text(size = 14),
+        axis.text.x = element_text(size = 12),
+        title = element_text(size = 16, face = "bold"))
+print(pns_rr_plot)
+dev.off()
+
+
+ggsave("manuscript/figures/relative_risk.svg", grid.arrange(cns_rr_plot, pns_rr_plot, ncol=2), width = 20, height = 8)
 ```
 
 
-```{r eval=FALSE, fig.height=7, fig.width=9, include=FALSE}
-demo_plot <- cowplot::plot_grid(gender_plot, age_plot, race_plot,
-  ncol = 1,
-  rel_heights = c(1, 1.1, 0.95)
-)
-
-demo_plot
-
-# ggsave('figs/demo.png', demo_plot, height = 8, width = 8)
-```
 
 ### LPCA deviance explained
 
@@ -985,150 +1017,23 @@ Across sites, 10 principal components explained above 75% of the deviance.
 
 ```{r}
 pca_dev <- list()
-for (i in results) {
+for (i in sorted_sites) {
   tmp <- get(i)
   if (!is.null(tmp$deviance_expl)) {
     pca_dev[[i]] <- data.frame(site = tmp$site, dev_expl = tmp$deviance_expl)
   }
 }
 
-# site_avails %>%
-#   filter(`data received` == 'Y') %>%
-#   pull(siteid) %>%
-#   setdiff(bind_rows(pca_dev) %>% pull(site))
 
-bind_rows(pca_dev) %>%
+pca_plot <- bind_rows(pca_dev) %>%
   ggplot(aes(x = fct_reorder(site, -dev_expl), y = dev_expl, group = 1)) +
   geom_point() +
   geom_line() +
   coord_cartesian(ylim = c(0, 1)) +
-  labs(y = "Comorbidity LPCA deviance explained", x = NULL)
+  labs(y = "Proportion of Deviance explained", x = NULL) + 
+  theme(axis.text.x=element_text(angle=90, hjust=1)); pca_plot
+
+ggsave("manuscript/figures/pca_deviance.png", pca_plot, height = 4, width = 6)
 ```
 
-## Other exploratory analyses
 
-```{r echo=T, message=FALSE, warning=FALSE, results='hide'}
-neuro_types <- c("None", "Central", "Peripheral", "Both")
-
-surv_plot <- combined_table %>%
-  filter(Demo_var == "survival") %>%
-  mutate(Dx = gsub("n_var_", "", Dx) %>% fct_relevel(neuro_types)) %>%
-  ggplot(aes(
-    x = Dx,
-    y = Count,
-    fill = Demo_var_i
-  )) +
-  # geom_violin(alpha = 0.2) +
-  geom_point(color = "white", shape = 21, size = 3) +
-  scale_fill_manual(values = c("#FFE3CB", "#E58605")) +
-  facet_wrap(~Demo_var_i, scale = "free_y", nrow = 1) +
-  xlab("") +
-  ylab("") +
-  theme_bw() +
-  theme(legend.position = "none") +
-  NULL
-
-# scales::seq_gradient_pal("white", '#CC61AF')(seq(0,1,length.out = 10))[-1]
-severity_plot <-
-  combined_table %>%
-  filter(Demo_var == "severity") %>%
-  mutate(Dx = gsub("n_var_", "", Dx) %>% fct_relevel(neuro_types)) %>%
-  ggplot(aes(
-    x = Demo_var_i,
-    y = Count,
-    fill = Demo_var_i
-  )) +
-  # geom_violin(alpha = 0.2) +
-  geom_point(color = "white", shape = 21, size = 3) +
-  scale_fill_manual(values = c("#F6DCED", "#CC61AF")) +
-  facet_wrap(~Dx, scale = "free_y", nrow = 1) +
-  xlab("") +
-  ylab("") +
-  theme_bw() +
-  theme(legend.position = "none") +
-  NULL
-
-readmit_plot <- ggplot(
-  combined_table %>%
-    filter(Demo_var == "readmitted") %>%
-    filter(!Dx == "None"),
-  aes(
-    x = site, y = Count, group = site,
-    fill = site
-  )
-) +
-  geom_bar(stat = "identity", position = "dodge") +
-  scale_fill_viridis_d() +
-  # rcartocolor::scale_fill_carto_d() +
-  facet_grid(Dx ~ Demo_var_i, scale = "free_y") +
-  # facet_wrap(~Dx, nrow = 1) +
-  xlab("") +
-  ylab("") +
-  theme_bw() +
-  theme(
-    legend.position = "none",
-    axis.text.x = element_text(size = 8, angle = 45, hjust = 1)
-  )
-
-# Create legend
-legend_b <- get_legend(
-  race_plot +
-    guides(color = guide_legend(nrow = 1)) +
-    theme(
-      legend.position = "top",
-      legend.title = element_blank()
-    )
-)
-```
-
-```{r}
-combined_table %>%
-  filter(Demo_var_i == "Alive") %>%
-  select(site, starts_with("prop")) %>%
-  distinct() %>%
-  pivot_longer(-site) %>%
-  mutate(name = gsub("prop_", "", name) %>% fct_relevel(neuro_types)) %>%
-  ggplot(aes(x = name, y = value, group = site, color = site)) +
-  geom_point() +
-  rcartocolor::scale_color_carto_d() +
-  geom_line() +
-  scale_y_continuous(limits = c(0, 1)) +
-  labs(x = NULL, y = "Proportion survived", color = NULL) +
-  theme(legend.position = "top") +
-  NULL
-
-combined_table %>%
-  filter(Demo_var_i == "Alive") %>%
-  select(site, starts_with("prop")) %>%
-  distinct() %>%
-  pivot_longer(-site) %>%
-  mutate(name = gsub("prop_", "", name) %>% fct_relevel(neuro_types)) %>%
-  ggplot(aes(x = name, y = value)) +
-  geom_boxplot() +
-  geom_point() +
-  scale_y_continuous(limits = c(0, 1)) +
-  labs(x = NULL, y = "Proportion survived") +
-  NULL
-
-combined_table %>%
-  filter(Demo_var_i == "Severe") %>%
-  select(site, starts_with("prop")) %>%
-  distinct() %>%
-  pivot_longer(-site) %>%
-  mutate(name = gsub("prop_", "", name) %>% fct_relevel(neuro_types)) %>%
-  ggplot(aes(x = name, y = value)) +
-  geom_boxplot() +
-  geom_point() +
-  scale_y_continuous(limits = c(0, 1)) +
-  labs(x = NULL, y = "Proportion severe") +
-  NULL
-```
-
-point size = count?
-
-```{r message=FALSE, warning=FALSE, fig.width=10}
-# Arrange plots
-# p1 <- plot_grid(sex_plot, age_plot, labels=c("A", "B"), ncol = 2, nrow = 1)
-# p2 <- plot_grid(race_plot, labels = c("C"), ncol = 1)
-plot_grid(severity_plot, surv_plot, labels = c("E", "F"), ncol = 2, nrow = 1)
-```

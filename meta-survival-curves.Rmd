@@ -71,7 +71,7 @@ get_life_row <- function(df,
                          period = "first_hosp_results",
                          neuro_type = neuro_type_analyze) {
   life_output <- df[[c(period, neuro_type, outcome, "average_survival", "survf")]]
-  bind_cols(life_output[c("surv", "std.err", "time", "strata")]) %>%
+  bind_cols(life_output[c("surv", "std.err", "time", "strata", "lower", "upper")]) %>%
     mutate(
       site = df$site,
       #n_site = df[[c(period, neuro_type, outcome, "cox")]]
@@ -105,19 +105,33 @@ for (outcome_i in outcomes) {
 }
 
 res_dat <- bind_rows(meta_results)
-res_dat_surv <- res_dat[[1]] %>% data.frame()
+res_dat_surv <- res_dat[["surv"]] %>% data.frame()
 colnames(res_dat_surv) <- c("None", "PNS", "CNS")
 
-res_dat_std.err <- res_dat[[2]] %>% data.frame()
+res_dat_std.err <- res_dat[["std.err"]] %>% data.frame()
 colnames(res_dat_std.err) <- c("None", "PNS", "CNS")
 res_dat_std.err <- res_dat_std.err  %>%
-  cbind(., res_dat[3:5]) %>% 
+  cbind(., res_dat[c("time", "site", "outcome")]) %>% 
   pivot_longer(cols = None:CNS,  names_to = "strata", values_to = "std.err")
 
+res_dat_lower <- res_dat[["lower"]] %>% data.frame()
+colnames(res_dat_lower) <- c("None", "PNS", "CNS")
+res_dat_lower <- res_dat_lower  %>%
+  cbind(., res_dat[c("time", "site", "outcome")]) %>% 
+  pivot_longer(cols = None:CNS,  names_to = "strata", values_to = "lower")
+
+res_dat_upper <- res_dat[["upper"]] %>% data.frame()
+colnames(res_dat_upper) <- c("None", "PNS", "CNS")
+res_dat_upper <- res_dat_upper  %>%
+  cbind(., res_dat[c("time", "site", "outcome")]) %>% 
+  pivot_longer(cols = None:CNS,  names_to = "strata", values_to = "upper")
+
 res_dat_surv <- res_dat_surv %>%
-  cbind(., res_dat[3:5]) %>% 
+  cbind(., res_dat[c("time", "site", "outcome")]) %>% 
   pivot_longer(cols = None:CNS,  names_to = "strata", values_to = "surv") %>% 
-  left_join(., res_dat_std.err) %>% 
+  left_join(., res_dat_std.err) %>%
+  left_join(., res_dat_lower) %>% 
+  left_join(., res_dat_upper) %>% 
   mutate(std.err = ifelse(is.nan(std.err), NA, std.err)) %>%
   filter(!time < 0) %>% 
   add_count(site, strata, outcome, name = "n_timepoints") %>%
@@ -127,6 +141,8 @@ res_dat_surv <- res_dat_surv %>%
   arrange(time) %>% 
   fill(surv, .direction = "down") %>%
   fill(std.err, n_timepoints, .direction = "down") %>%
+  fill(lower, .direction = "down") %>%
+  fill(upper, .direction = "down") %>%
   #fill(std.err, n_site, n_timepoints, .direction = "downup") %>%
   #filter(n_timepoints >= 5, time >= 0) %>%
   ungroup()
@@ -160,16 +176,18 @@ for(i in site_names) {
              fct_recode(
                "Mortality" = "time_deceased_reg_elix",
                "Severity" = "time_severe_reg_elix",
-               "Time to first discharge" = "time_first_discharge_reg_elix"
+               "Discharge" = "time_first_discharge_reg_elix"
              )) %>% 
     filter(site == i) %>% 
-    group_by(outcome, strata) %>% 
+    # mutate(ci_lower = surv - std.err*zval,
+    # ci_upper = surv + std.err*zval) %>% 
+    group_by(outcome, strata) %>%
     mutate(
       lt_hat = log(-log(surv)),
-      se_lt_hat = standard_error(surv)) %>% 
-    ungroup() %>% 
+      se_lt_hat = standard_error(lt_hat)) %>%
+    ungroup() %>%
     mutate(ci_lower = exp(-exp(log(-log(surv)) + zval*se_lt_hat)),
-           ci_upper = exp(-exp(log(-log(surv)) - zval*se_lt_hat))) %>% 
+           ci_upper = exp(-exp(log(-log(surv)) - zval*se_lt_hat))) %>%
     filter(time <= 60) %>% 
     ggplot(aes(
     x = time, y = surv,
@@ -378,9 +396,15 @@ meta_surv_df <- res_dat_surv %>%
         "Discharge" = "time_first_discharge_reg_elix"
       )
   ) %>% 
-    mutate(ci_l = surv - se*zval,
-           ci_u = surv + se*zval) %>% 
-  distinct(outcome, strata, time, surv, se, ci_l, ci_u)
+    # mutate(ci_l = surv - se*zval,
+    #        ci_u = surv + se*zval) %>% 
+    mutate(
+      lt_hat = log(-log(surv)),
+      se_lt_hat = standard_error(lt_hat)) %>%
+    ungroup() %>%
+    mutate(ci_lower = exp(-exp(log(-log(surv)) + zval*se_lt_hat)),
+           ci_upper = exp(-exp(log(-log(surv)) - zval*se_lt_hat)))  
+  distinct(outcome, strata, time, surv, se, ci_l, ci_u) 
 
 # refactor
 meta_surv_df$strata <- as.factor(meta_surv_df$strata)
