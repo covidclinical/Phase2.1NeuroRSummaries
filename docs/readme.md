@@ -1,6 +1,6 @@
 ### Neurological Diagnoses in Hospitalized COVID-19 Patients Associated With Adverse Outcomes: A Multinational Cohort Study
 
-Hutch, MR*, Son J*, Le TT*, Hong C*, Xuan W*, Shakeri Z*, Morris M, Gutiérrez-Sacristán A, Klann G, Spiridou A, Bellazzi Riccardo, Benoit V, Bonzel Clara-Lea, Bryant WA, Cho K, Das P, Hanauer DA, Henderson DW, Ho YL, Loh W, Makoudjou A, Malovini A, Moal B, Mowery DL, Samayamuthu MJ, Sanz Vidorreta FJ, Schriver ER, Schubert P, Talbert J, Tan ALM, Tan BWL, Tan BWQ, Tibollo V, Yuan W, Avillach P, Gehlenborg N, Omenn GS, Characterization of COVID-19 by EHR (4CE), The Consortium for Clinical, Visweswaran S**, Cai T**, Luo Y**, Xia Z**.
+Hutch, MR*, Son J*, Le TT*, Hong C*, Xuan W*, Shakeri Z*, Morris M, Gutiérrez-Sacristán A, Klann G, Spiridou A, Bellazzi Riccardo, Benoit V, Bonzel C, Bryant WA, Cho K, Das P, Hanauer DA, Henderson DW, Ho YL, Loh W, Makoudjou A, Malovini A, Moal B, Mowery DL, Samayamuthu MJ, Sanz Vidorreta FJ, Schriver ER, Schubert P, Talbert J, Tan ALM, Tan BWL, Tan BWQ, Tibollo V, Yuan W, Avillach P, Gehlenborg N, Omenn GS, Characterization of COVID-19 by EHR (4CE), The Consortium for Clinical, Visweswaran S**, Cai T**, Luo Y**, Xia Z**.
 
 *Share first co-authorship, **Share senior co-authorship
 
