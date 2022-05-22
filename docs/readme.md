@@ -14,7 +14,7 @@ Hutch, MR*, Son J*, Le TT*, Hong C*, Xuan W*, Shakeri Z*, Morris M, Gutiérrez-S
 
 A [Consortium for Clinical Characterization of COVID-19 by EHR](https://covidclinical.net/) study.
 
-Our study leverages a multinational study of > 87,000 hospitalized COVID-19 positive patients from 21 healthcare systems across 6 countries. We examined the clinical health outcomes (length of hospital stay, disease severity, and mortality) of COVID-19 patients with concurrent neurological illness. 
+Our study leverages a multinational study of > 87,000 hospitalized COVID-19 positive patients from 21 healthcare systems across 6 countries. We examined and report the clinical health outcomes (length of hospital stay, disease severity, and mortality) of COVID-19 patients with concurrent neurological illness. 
 
 ## 
 
